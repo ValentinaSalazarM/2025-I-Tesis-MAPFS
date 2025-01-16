@@ -1,0 +1,132 @@
+volumes:
+  grafana-data:
+  prometheus-data:    
+  loki-data:
+
+services:
+  loki:
+    image: grafana/loki:2.8.2
+    container_name: loki
+    restart: unless-stopped
+    volumes:
+    - ./loki-config.yml:/mnt/config/loki-config.yml
+    - ./loki-data:/tmp/loki
+    ports:
+    - 3100:3100
+    command: 
+    - '-config.file=/mnt/config/loki-config.yml'
+    networks:
+      - iot_network
+  
+  grafana:
+    image: grafana/grafana:10.0.2
+    container_name: grafana
+    restart: unless-stopped
+    volumes:
+    - grafana-data:/var/lib/grafana
+    ports:
+    - 3000:3000
+    networks:
+      - iot_network
+
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: prometheus
+    restart: unless-stopped
+    volumes:
+    - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    - prometheus-data:/prometheus
+    ports:
+    - 9090:9090
+    command:
+    - '--config.file=/etc/prometheus/prometheus.yml'
+    - '--storage.tsdb.path=/prometheus'
+    - '--storage.tsdb.retention.time=1y'
+    - '--web.enable-lifecycle'
+    networks:
+      - iot_network
+
+  node_exporter:
+    image: quay.io/prometheus/node-exporter:v1.6.1
+    container_name: node_exporter
+    restart: unless-stopped
+    ports:
+    - 9100:9100
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    command: 
+      - '--path.procfs=/host/proc' 
+      - '--path.sysfs=/host/sys'
+      - --collector.processes
+      - --collector.filesystem.ignored-mount-points
+      - "^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns|rootfs/var/lib/docker/aufs)($$|/)"
+    networks:
+      - iot_network
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.1
+    container_name: cadvisor
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # Monta el sistema de archivos raíz del host
+      - /:/rootfs:ro
+      # Monta el socket de Docker para obtener información en tiempo real
+      - /var/run:/var/run:rw
+      # Monta los datos de Docker para acceder a los metadatos de contenedores
+      - /var/lib/docker:/var/lib/docker:ro
+      # Proporciona acceso a las estadísticas del kernel
+      - /sys:/sys:ro
+    privileged: true
+    #command:
+    #- --enable_load_reader=false
+    networks:
+      - iot_network
+
+  device:
+    build:
+      context: ./Device
+    networks:
+      - iot_network
+    volumes:
+      - ./logs/device:/logs
+    ports:
+      - "8012:8012"
+
+  gateway:
+    build:
+      context: ./Gateway
+    networks:
+      - iot_network
+    volumes:
+      - ./logs/gateway:/logs
+    depends_on:
+      - cloud
+    logging:
+      driver: loki
+      options:
+        loki-url: "http://localhost:3100/loki/api/v1/push"  
+    ports:
+      - "8000:8000"
+      - "8010:8010"
+
+  cloud:
+    build:
+      context: ./Cloud
+    networks:
+      - iot_network
+    volumes:
+      - ./logs/cloud:/logs
+    logging:
+      driver: loki
+      options:
+        loki-url: "http://localhost:3100/loki/api/v1/push"  
+    ports:
+      - "8001:8001"
+      - "8011:8011"
+
+networks:
+  iot_network:
+    driver: bridge
