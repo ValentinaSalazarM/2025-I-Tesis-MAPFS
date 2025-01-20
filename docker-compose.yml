@@ -88,6 +88,7 @@ services:
   device:
     build:
       context: ./Device
+    container_name: device
     networks:
       - iot_network
     volumes:
@@ -98,6 +99,7 @@ services:
   gateway:
     build:
       context: ./Gateway
+    container_name: gateway
     networks:
       - iot_network
     volumes:
@@ -108,6 +110,8 @@ services:
       driver: loki
       options:
         loki-url: "http://localhost:3100/loki/api/v1/push"  
+    labels:
+      - service_id=gateway
     ports:
       - "8000:8000"
       - "8010:8010"
@@ -115,6 +119,7 @@ services:
   cloud:
     build:
       context: ./Cloud
+    container_name: cloud
     networks:
       - iot_network
     volumes:
@@ -123,6 +128,8 @@ services:
       driver: loki
       options:
         loki-url: "http://localhost:3100/loki/api/v1/push"  
+    labels:
+      - service_id=cloud
     ports:
       - "8001:8001"
       - "8011:8011"
