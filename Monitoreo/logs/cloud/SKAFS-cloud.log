@@ -1,0 +1,19 @@
+2025-01-23 00:34:00,781 - INFO - API del Cloud Admin iniciada.
+2025-01-23 00:34:00,782 - INFO - Socket Cloud escuchando en 0.0.0.0:5001
+2025-01-23 00:34:12,844 - INFO - Enviando desafíos C_F0 y C_F1 al IoT.
+2025-01-23 00:34:12,857 - INFO - Recibidos datos del dispositivo IoT: IoT_Identity=94845, DPUF_C1=78571, FPUF_Fixed_F0=75885, FPUF_Fixed_F1=35454
+2025-01-23 00:34:12,857 - INFO - Dispositivo IoT con ID 94845 registrado exitosamente.
+2025-01-23 00:34:12,858 - INFO - Claves asociadas: {'IoT_T_j': 119425, 'CA_K_before_previous': 15982, 'CA_K_previous': 67346, 'CA_K_current': 78571}
+2025-01-23 00:35:59,258 - INFO - API del Cloud Admin iniciada.
+2025-01-23 00:35:59,258 - INFO - Socket Cloud escuchando en 0.0.0.0:5001
+2025-01-23 00:36:48,942 - INFO - Gateway con ID 99463 registrado exitosamente.
+2025-01-23 00:36:48,943 - INFO - Claves asociadas: {'CA_MK_G_CA': 74335, 'CA_Sync_K_G_CA_previous': 22149, 'CA_r_1_previous': 28723, 'CA_Sync_K_G_CA': 17701}
+2025-01-23 00:41:56,867 - INFO - API del Cloud Admin iniciada.
+2025-01-23 00:41:56,868 - INFO - Socket Cloud escuchando en 0.0.0.0:5001
+2025-01-23 00:43:06,426 - INFO - API del Cloud Admin iniciada.
+2025-01-23 00:43:06,427 - INFO - Socket Cloud escuchando en 0.0.0.0:5001
+2025-01-23 00:43:58,111 - INFO - Enviando desafíos C_F0 y C_F1 al IoT.
+2025-01-23 00:43:58,127 - INFO - Recibidos datos del dispositivo IoT: IoT_Identity=92861, DPUF_C1=90069, FPUF_Fixed_F0=91017, FPUF_Fixed_F1=55680
+2025-01-23 00:43:58,127 - INFO - Dispositivo IoT con ID 92861 registrado exitosamente.
+2025-01-23 00:43:58,127 - INFO - Claves asociadas: {'IoT_T_j': 63444, 'CA_K_before_previous': 77277, 'CA_K_previous': 82748, 'CA_K_current': 90069}
+2025-01-23 00:47:33,903 - INFO - API del Cloud Admin iniciada.

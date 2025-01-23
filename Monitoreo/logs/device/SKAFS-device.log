@@ -1,0 +1,8 @@
+2025-01-23 00:34:12,840 - INFO - IoT_Identity: 94845
+2025-01-23 00:34:12,846 - INFO - Desafíos recibidos del CA.
+2025-01-23 00:34:12,859 - INFO - Datos enviados y respuesta recibida del CA.
+2025-01-23 00:34:12,859 - INFO - Registro completado exitosamente con los siguientes parámetros: {'state': 27796, 'C_1': 74043, 'IoT_Identity': 94845, 'K_previous': 67346, 'T_j': 119425}
+2025-01-23 00:43:58,106 - INFO - IoT_Identity: 92861
+2025-01-23 00:43:58,114 - INFO - Desafíos recibidos del CA.
+2025-01-23 00:43:58,129 - INFO - Datos enviados y respuesta recibida del CA.
+2025-01-23 00:43:58,129 - INFO - Registro completado exitosamente con los siguientes parámetros: {'state': 44122, 'C_1': 58494, 'IoT_Identity': 92861, 'K_previous': 82748, 'T_j': 63444}

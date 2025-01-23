@@ -1,0 +1,7 @@
+fastapi
+pydantic
+uvicorn
+requests
+fastecdsa
+pycryptodome
+prometheus_client

@@ -9,8 +9,8 @@ services:
     container_name: loki
     restart: unless-stopped
     volumes:
-    - ./loki-config.yml:/mnt/config/loki-config.yml
-    - ./loki-data:/tmp/loki
+    - ./Monitoreo/loki-config.yml:/mnt/config/loki-config.yml
+    - ./Monitoreo/loki-data:/tmp/loki
     ports:
     - 3100:3100
     command: 
@@ -23,7 +23,7 @@ services:
     container_name: grafana
     restart: unless-stopped
     volumes:
-    - grafana-data:/var/lib/grafana
+    - ./Monitoreo/grafana-data:/var/lib/grafana
     ports:
     - 3000:3000
     networks:
@@ -34,8 +34,8 @@ services:
     container_name: prometheus
     restart: unless-stopped
     volumes:
-    - ./prometheus.yml:/etc/prometheus/prometheus.yml
-    - prometheus-data:/prometheus
+    - ./Monitoreo/prometheus.yml:/etc/prometheus/prometheus.yml
+    - ./Monitoreo/prometheus-data:/prometheus
     ports:
     - 9090:9090
     command:
@@ -85,54 +85,63 @@ services:
     networks:
       - iot_network
 
-  device:
+  skafs-cloud:
     build:
-      context: ./Device
-    container_name: device
+      context: ./IoT
+      dockerfile: ./cloud/Dockerfile
+    container_name: skafs-cloud
     networks:
       - iot_network
     volumes:
-      - ./logs/device:/logs
+      - ./Monitoreo/logs/cloud:/logs
+    logging:
+      driver: loki
+      options:
+        loki-url: "http://localhost:3100/loki/api/v1/push"  
     ports:
-      - "8012:8012"
+      - "8001:8001" #API
+      - "8011:8011" #Prometheus
+      - "5001:5001" #Socket
+    command: ["python", "-m", "cloud.SKAFS-CA"]
 
-  gateway:
+  skafs-gateway:
     build:
-      context: ./Gateway
-    container_name: gateway
-    networks:
-      - iot_network
-    volumes:
-      - ./logs/gateway:/logs
+      context: ./IoT
+      dockerfile: ./gateway/Dockerfile
+    container_name: skafs-gateway
     depends_on:
-      - cloud
-    logging:
-      driver: loki
-      options:
-        loki-url: "http://localhost:3100/loki/api/v1/push"  
-    labels:
-      - service_id=gateway
-    ports:
-      - "8000:8000"
-      - "8010:8010"
-
-  cloud:
-    build:
-      context: ./Cloud
-    container_name: cloud
+      - skafs-cloud
     networks:
       - iot_network
     volumes:
-      - ./logs/cloud:/logs
+      - ./Monitoreo/logs/gateway:/logs
     logging:
       driver: loki
       options:
         loki-url: "http://localhost:3100/loki/api/v1/push"  
-    labels:
-      - service_id=cloud
     ports:
-      - "8001:8001"
-      - "8011:8011"
+      - "8010:8010" #Prometheus
+      - "5000:5000" #Socket
+    command: ["python", "-m", "gateway.SKAFS-Gateway"]
+  
+  skafs-device:
+    build:
+      context: ./IoT
+      dockerfile: ./device/Dockerfile
+    container_name: skafs-device
+    depends_on:
+      - skafs-gateway
+    networks:
+      - iot_network
+    logging:
+      driver: loki
+      options:
+        loki-url: "http://localhost:3100/loki/api/v1/push"  
+    volumes:
+      - ./Monitoreo/logs/device:/logs
+    ports:
+      - "8012:8012" #Prometheus
+    command: ["python", "-m", "device.SKAFS-Device"]
 
 networks:
   iot_network:
