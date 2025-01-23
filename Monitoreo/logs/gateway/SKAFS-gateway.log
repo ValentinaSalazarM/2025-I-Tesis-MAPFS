@@ -1,13 +1,11 @@
-2025-01-23 00:34:12,342 - INFO - Generado Gateway_Identity: 39624
-2025-01-23 00:34:12,345 - ERROR - Error al enviar Gateway_Identity al CA: HTTPConnectionPool(host='skafs-cloud', port=8001): Max retries exceeded with url: /registration/gateway (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7f82b4034280>: Failed to establish a new connection: [Errno 111] Connection refused'))
-2025-01-23 00:36:10,584 - INFO - Gateway_Identity: 68160
-2025-01-23 00:36:10,588 - ERROR - Error al enviar Gateway_Identity al CA: HTTPConnectionPool(host='skafs-cloud', port=8001): Max retries exceeded with url: /registration/gateway (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7ff52a9fd2b0>: Failed to establish a new connection: [Errno 111] Connection refused'))
-2025-01-23 00:36:48,937 - INFO - Gateway_Identity: 99463
-2025-01-23 00:36:48,945 - INFO - Enviado Gateway_Identity al CA.
-2025-01-23 00:36:48,945 - INFO - Recibidos parámetros del CA para el Gateway.
-2025-01-23 00:36:48,945 - INFO - Claves calculadas en el Gateway: G_Sync_K_G_CA=17701
-2025-01-23 00:36:48,945 - INFO - Registro del Gateway completado con los parámetros: {'Gateway_Identity': 99463, 'G_MK_G_CA': 74335, 'G_Sync_K_G_CA_previous': 22149, 'G_r_1_previous': 28723, 'G_Sync_K_G_CA': 17701, 'Sync_IoT_G': 0}
-2025-01-23 00:42:08,379 - INFO - Gateway_Identity: 39055
-2025-01-23 00:42:08,383 - ERROR - Error al enviar Gateway_Identity al CA: HTTPConnectionPool(host='skafs-cloud', port=8001): Max retries exceeded with url: /registration/gateway (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7fecf5442280>: Failed to establish a new connection: [Errno 111] Connection refused'))
-2025-01-23 00:43:57,615 - INFO - Gateway_Identity: 91200
-2025-01-23 00:43:57,618 - ERROR - Error al enviar Gateway_Identity al CA: HTTPConnectionPool(host='skafs-cloud', port=8001): Max retries exceeded with url: /registration/gateway (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7fbda6c85280>: Failed to establish a new connection: [Errno 111] Connection refused'))
+2025-01-23 14:53:38,013 - INFO - Gateway_Identity: 1633705481278746579
+2025-01-23 14:53:38,020 - INFO - Enviado Gateway_Identity al CA.
+2025-01-23 14:53:38,020 - INFO - Recibidos parámetros del CA para el Gateway.
+2025-01-23 14:53:38,021 - INFO - Claves calculadas en el Gateway: G_Sync_K_G_CA=99719
+2025-01-23 14:53:38,021 - INFO - Registro del Gateway completado con los parámetros: {'Gateway_Identity': 1633705481278746579, 'G_MK_G_CA': 10830737475368800238, 'G_Sync_K_G_CA_previous': 13281180589510185458, 'G_r_1_previous': 1856070318605275117, 'G_Sync_K_G_CA': 99719, 'Sync_IoT_G': 0}
+2025-01-23 14:53:38,021 - INFO - Socket Gateway escuchando en 0.0.0.0:5000
+2025-01-23 14:53:50,872 - INFO - Conexión aceptada de ('172.18.0.9', 51072)
+2025-01-23 14:53:50,872 - INFO - PASO 1: {'step': 'hello', 'message': 'hello'}
+2025-01-23 14:53:50,872 - INFO - Mensaje recibido del IoT Device: hello
+2025-01-23 14:53:50,873 - INFO - PASO 2: r_1 generado y enviado al dispositivo IoT: 14797847049471466066
+2025-01-23 14:53:50,874 - ERROR - Error inesperado durante la autenticación mutua: Expecting value: line 1 column 1 (char 0)

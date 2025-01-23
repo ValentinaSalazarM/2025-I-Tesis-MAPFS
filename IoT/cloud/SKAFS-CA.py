@@ -1,15 +1,18 @@
 import requests
 import logging
 import uvicorn
-import random
 import socket
+import base64
 import json
 import os
+import threading
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from common.cripto_primitivas import *
+
+from prometheus_client import start_http_server, Counter
 
 # Configuración del logger
 logging.basicConfig(
@@ -30,12 +33,12 @@ HOST = "0.0.0.0"
 PORT = 5001         
 
 # Generación de la identidad y la clave a largo plazo 
-CA_Identity = K = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000    
-K = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000  
+CA_Identity = K = int.from_bytes(os.urandom(8), 'little') %P256.q
+K = int.from_bytes(os.urandom(8), 'little') %P256.q
 
 # Generación de desafíos fija (C_F0, C_F1) simulando PUF
-C_F0 = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000  
-C_F1 = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000  
+C_F0 = int.from_bytes(os.urandom(8), 'little') %P256.q
+C_F1 = int.from_bytes(os.urandom(8), 'little') %P256.q
 
 # Lista global para almacenar los sensores registrados
 registered_devices = []
@@ -48,10 +51,10 @@ gateway_keys = {}  # Diccionario para almacenar variables por Gateway_Identity
 Gateway_Identity = None
 
 #######################################################
-#               SERVIDOR SOCKET CLOUD                 #
+#                 INICIAR SERVIDORES                  #
 #######################################################
 
-def startCloudServer():
+def startSocket():
     """
     Inicia el servidor socket para manejar conexiones del Gateway.
     """
@@ -63,6 +66,13 @@ def startCloudServer():
         while True:
             gateway_socket, addr = server_socket.accept()
             logger.info(f"Conexión aceptada de {addr}")
+            handleMutualAuthentication(gateway_socket)
+
+def startApiServer():
+    """
+    Inicia el servidor de la API con Uvicorn.
+    """
+    uvicorn.run(app, host="0.0.0.0", port=8001)
 
 #######################################################
 #              REGISTRO DISPOSITIVO IOT               #
@@ -110,8 +120,8 @@ async def registerDevice(data: IoTRegistrationRequest):
     IoT_T_j = K ^ FPUF_Fixed_F0 ^ FPUF_Fixed_F1
 
     # Generar variables CA_K específicas para este dispositivo
-    CA_K_before_previous = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000  
-    CA_K_previous = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000  
+    CA_K_before_previous = int.from_bytes(os.urandom(8), 'little') %P256.q
+    CA_K_previous = int.from_bytes(os.urandom(8), 'little') %P256.q
     CA_K_current = DPUF_C1  # Actualización con DPUF_C1 recibido
 
     # Registrar el dispositivo
@@ -167,9 +177,10 @@ async def registerGateway(data: GatewayRegistrationRequest):
     Gateway_Identity = data.Gateway_Identity
 
     # Generar parámetros específicos para el gateway
-    CA_MK_G_CA = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000  
-    CA_Sync_K_G_CA_previous = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000  
-    CA_r_1_previous = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000  
+    CA_MK_G_CA = int.from_bytes(os.urandom(8), 'little')
+    CA_Sync_K_G_CA_previous = int.from_bytes(os.urandom(8), 'little')
+    CA_r_1_previous = int.from_bytes(os.urandom(8), 'little')
+    logger.info(f"CA_MK_G_CA={CA_MK_G_CA}, CA_Sync_K_G_CA_previous={CA_Sync_K_G_CA_previous}; CA_r_1_previous={CA_r_1_previous}")
     CA_Sync_K_G_CA = Hash(CA_Sync_K_G_CA_previous, CA_r_1_previous)
     
     # Registrar el gateway
@@ -202,10 +213,13 @@ def handleMutualAuthentication(gateway_socket):
     try:
         # Paso 1: Recibir datos del Gateway
         data = gateway_socket.recv(4096)
-        data = json.loads(data.decode('utf-8'))
-
+        received_message = json.loads(data.decode('utf-8'))
+        decoded_message = decode_message(received_message)
+        logger.info(f"PASO 1:decoded_message:{decoded_message}.")
+        
         # Realizar cálculos y preparar respuesta
-        ReturnData = RetrieveR_2_ID(data)
+        ReturnData = RetrieveR_2_ID(decoded_message)
+        logger.info(f"PASO 1: ReturnData={ReturnData}.")
         message = ReturnData[:6]
         HashResult = ReturnData[6]
         G_r_1_Decrypted = ReturnData[7]
@@ -220,22 +234,24 @@ def handleMutualAuthentication(gateway_socket):
             "Epison_2_4": message[4],
             "D_sync_CA_G": message[5],
         }
-        gateway_socket.sendall(json.dumps(response_payload).encode('utf-8'))
-        logger.info("Enviado mensaje de sincronización al Gateway.")
+        encoded_message = encode_message(response_payload)
+        gateway_socket.sendall(json.dumps(encoded_message).encode('utf-8'))
+        logger.info("PASO 2: Enviado mensaje de sincronización al Gateway.")
 
         # Paso 3: Recibir Epison_3_1 del Gateway
         data = gateway_socket.recv(4096)
-        data = json.loads(data.decode('utf-8'))
+        received_message = json.loads(data.decode('utf-8'))
+        decoded_message = decode_message(received_message)
         if "Epison_3_1" not in data:
             raise KeyError("Falta Epison_3_1 en la solicitud del Gateway.")
-        Epison_3_1 = data["Epison_3_1"]
-        logger.info("Recibido Epison_3_1 del Gateway.") 
+        Epison_3_1 = decoded_message["Epison_3_1"]
+        logger.info("PASO 3: Recibido Epison_3_1 del Gateway.") 
         
         # Actualizar las claves de sincronización
         CA_K_before_previous = device_keys[IoT_Identity]["CA_K_before_previous"]
         CA_K_previous = device_keys[IoT_Identity]["CA_K_previous"]
         CA_K_current = device_keys[IoT_Identity]["CA_K_current"]
-        CA_Sync_K_G_CA = registered_gateways[Gateway_Identity]["CA_Sync_K_G_CA"]
+        CA_Sync_K_G_CA = gateway_keys[Gateway_Identity]["CA_Sync_K_G_CA"]
 
         M_3 = updatingSynchronizationKeys(
             Gateway_Identity,
@@ -250,8 +266,10 @@ def handleMutualAuthentication(gateway_socket):
         logger.info("Claves de sincronización actualizadas correctamente.")
 
         # Paso 4: Enviar M_4 al Gateway
-        gateway_socket.sendall(json.dumps({"M_3": M_3}).encode('utf-8'))
-        logger.info("Mensaje M_3 enviado al Gateway.")
+        encoded_message = encode_message({"M_3": M_3})
+        logger.info("PASO 4: M_3={M_3}")
+        gateway_socket.sendall(json.dumps(encoded_message).encode('utf-8'))
+        logger.info("PASO 4: Mensaje M_3 enviado al Gateway.")
         
     except KeyError as e:
         logger.error(f"Clave faltante en los datos recibidos: {e}")
@@ -261,40 +279,40 @@ def handleMutualAuthentication(gateway_socket):
         gateway_socket.close()
     
 def RetrieveR_2_ID(data):
-    Gateway_Identity= data[0]
-    G_nonce= data[1]
-    G_sigma_1= data[2]
-    G_sigma_2= data[3]
-    Epison_1_1= data[4]
-    Epison_1_2= data[5]
-    Epison_1_3= data[6]
-    Epison_1_4= data[7]
-    Epison_1_5= data[8]
-    iv= data[9]
-
+    G_nonce= data["G_nonce"]
+    G_sigma_1= data["G_sigma_1"]
+    G_sigma_2= data["G_sigma_2"]
+    Epison_1_1= data["Epison_1_1"]
+    Epison_1_2= data["Epison_1_2"]
+    Epison_1_3= data["Epison_1_3"]
+    Epison_1_4= data["Epison_1_4"]
+    Epison_1_5= data["Epison_1_5"]
+    iv= data["iv"]
+    
+    logger.info(f"RetrieveR_2_ID gateway_keys={gateway_keys}; Gateway_Identity={Gateway_Identity}.")
     # Datos del registro del gateway
-    CA_MK_G_CA = registered_gateways[Gateway_Identity]["CA_MK_G_CA"]
-    CA_Sync_K_G_CA_previous = registered_gateways[Gateway_Identity]["CA_Sync_K_G_CA_previous"]
-    CA_Sync_K_G_CA = registered_gateways[Gateway_Identity]["CA_Sync_K_G_CA"]
+    CA_MK_G_CA = gateway_keys[Gateway_Identity]["CA_MK_G_CA"]
+    CA_Sync_K_G_CA_previous = gateway_keys[Gateway_Identity]["CA_Sync_K_G_CA_previous"]
+    CA_Sync_K_G_CA = gateway_keys[Gateway_Identity]["CA_Sync_K_G_CA"]
     
     h1 = hashlib.new('sha256')
-    h1.update(CA_Sync_K_G_CA.to_bytes(32, 'big'))
+    h1.update(CA_Sync_K_G_CA.to_bytes(32, 'little'))
     HashResult=bytes(h1.hexdigest(),'utf-8')
 
     DEC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    IoT_ID_Decrypted=int.from_bytes(DEC.decrypt(Epison_1_1), 'big')
+    IoT_ID_Decrypted=int.from_bytes(DEC.decrypt(Epison_1_1), 'little')
 
     DEC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    IoT_r_2_Decrypted=int.from_bytes(DEC.decrypt(Epison_1_2),'big')
+    IoT_r_2_Decrypted=int.from_bytes(DEC.decrypt(Epison_1_2),'little')
 
     DEC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    IoT_r_3_Decrypted=int.from_bytes(DEC.decrypt(Epison_1_3),'big')
+    IoT_r_3_Decrypted=int.from_bytes(DEC.decrypt(Epison_1_3),'little')
         
     DEC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    G_r_1_Decrypted=int.from_bytes(DEC.decrypt(Epison_1_4),'big')
+    G_r_1_Decrypted=int.from_bytes(DEC.decrypt(Epison_1_4),'little')
 
     DEC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    IoT_K_i_Decrypted=int.from_bytes(DEC.decrypt(Epison_1_5),'big')
+    IoT_K_i_Decrypted=int.from_bytes(DEC.decrypt(Epison_1_5),'little')
    
     assert G_sigma_1 ==Hash(CA_MK_G_CA,Gateway_Identity,G_nonce), "The authentication of the Gateway by the CA has failed"
 
@@ -313,23 +331,23 @@ def RetrieveR_2_ID(data):
     CA_K_current = device_keys[IoT_Identity]["CA_K_current"]
     CA_r_1_previous = device_keys[IoT_Identity]["CA_r_1_previous"]
     ENC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    Epison_2_1=ENC.encrypt(CA_K_before_previous.to_bytes(4,'big'))
+    Epison_2_1=ENC.encrypt(CA_K_before_previous.to_bytes(4,'little'))
 
     ENC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    Epison_2_2=ENC.encrypt(CA_K_previous.to_bytes(4,'big'))
+    Epison_2_2=ENC.encrypt(CA_K_previous.to_bytes(4,'little'))
 
     ENC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    Epison_2_3=ENC.encrypt(CA_K_current.to_bytes(4,'big'))
+    Epison_2_3=ENC.encrypt(CA_K_current.to_bytes(4,'little'))
 
     ENC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    Epison_2_4=ENC.encrypt(CA_r_1_previous.to_bytes(4,'big'))
+    Epison_2_4=ENC.encrypt(CA_r_1_previous.to_bytes(4,'little'))
 
     return CA_sigma_3, Epison_2_1, Epison_2_2, Epison_2_3, Epison_2_4, D_sync_CA_G, HashResult, G_r_1_Decrypted, iv
 
 def updatingSynchronizationKeys(Gateway_Identity,Epison_3_1,HashResult,iv,G_r_1_Decrypted,CA_K_previous,CA_K_current,CA_Sync_K_G_CA):
         
     DEC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    CA_IoT_K_i_next=int.from_bytes(DEC.decrypt(Epison_3_1),'big')
+    CA_IoT_K_i_next=int.from_bytes(DEC.decrypt(Epison_3_1),'little')
 
     ##### Update the IoT synchronization keys ##############
     
@@ -349,9 +367,54 @@ def updatingSynchronizationKeys(Gateway_Identity,Epison_3_1,HashResult,iv,G_r_1_
     registered_gateways[Gateway_Identity]["CA_Sync_K_G_CA_previous"] = CA_Sync_K_G_CA_previous
     return M_3
 
+#######################################################
+#                      AUXILIARES                     #
+#######################################################
+
+def encode_message(message_dict):
+    """
+    Convierte un mensaje en un formato JSON serializable.
+    Los objetos de tipo bytes se codifican en base64.
+    """
+    logger.info(f"Encode message={message_dict}")
+    encoded_message = {}
+    
+    # Recorre y codifica cada elemento del mensaje
+    for key in message_dict:
+        value = message_dict[key]
+        if isinstance(value, bytes):
+            encoded_message[key] = base64.b64encode(value).decode('utf-8')  # Convertir bytes a base64 y luego a str
+        else:
+            encoded_message[key] = value
+    return encoded_message
+
+def decode_message(encoded_message_dict):
+    """
+    Convierte un mensaje codificado en base64 de vuelta a su forma original.
+    """
+    decoded_message = {}
+    # Recorre y decodifica cada elemento del mensaje
+    for key in encoded_message_dict:
+        value = encoded_message_dict[key]
+        try:
+            decoded_message [key] = base64.b64decode(value) if isinstance(value, str) else value
+        except ValueError:
+            decoded_message [key] = value  # Si no es base64, se retorna como está
+    return decoded_message
+
 if __name__ == "__main__":
-    #logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8011.")
-    #start_http_server(8011, addr="0.0.0.0")
-    uvicorn.run(app, host="0.0.0.0", port=8001)
-    logger.info("API del Cloud Admin iniciada.")
-    #startCloudServer()
+    # Inicia el servidor de métricas Prometheus
+    logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8011.")
+    start_http_server(8011, addr="0.0.0.0")
+
+    # Crear hilos para la API y el servidor de sockets
+    api_thread = threading.Thread(target=startApiServer)
+    socket_thread = threading.Thread(target=startSocket)
+
+    # Iniciar ambos hilos
+    api_thread.start()
+    socket_thread.start()
+
+    # Esperar a que los hilos terminen
+    api_thread.join()
+    socket_thread.join()

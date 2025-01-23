@@ -43,11 +43,11 @@ def registrationIoT():
     global registration_parameters, C_F0, C_F1
     
     # Generación de DPUF challenge y estado
-    C_1 = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000  
-    state = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000  
+    C_1 = int.from_bytes(os.urandom(8), 'little') %P256.q
+    state = int.from_bytes(os.urandom(8), 'little') %P256.q
 
     # Generación de la identidad del IoT
-    IoT_Identity = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000  
+    IoT_Identity = int.from_bytes(os.urandom(8), 'little') %P256.q
 
     logger.info(f"IoT_Identity: {IoT_Identity}")
     
@@ -111,7 +111,7 @@ def mutualAuthentication():
     global registration_parameters
 
     try:
-         # Inicializar el socket persistente
+        # Inicializar el socket persistente
         initialize_socket()
         
         # Paso 1: Enviar mensaje inicial ("hello") al gateway
@@ -175,8 +175,8 @@ def mutualAuthentication():
         close_socket() 
 
 def IoTobfuscationForR_2_ID(G_r_1):
-    r_2 = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000  
-    r_3 = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000  
+    r_2 = int.from_bytes(os.urandom(64), 'little') 
+    r_3 = int.from_bytes(os.urandom(64), 'little') 
 
     IoT_Identity = registration_parameters["IoT_Identity"]
     C_1 = registration_parameters["C_1"]
@@ -225,7 +225,6 @@ def initialize_socket():
     Inicializa un socket persistente para comunicarse con el Gateway.
     """
     global gateway_socket
-    logger.info(f"Conectado al Gateway en {GATEWAY_HOST}:{GATEWAY_PORT}")
     if gateway_socket is None:
         try:
             gateway_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -280,5 +279,5 @@ if __name__ == '__main__':
     #logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8012.")
     #start_http_server(8012, addr="0.0.0.0")
     registrationIoT()
-    #mutualAuthentication()
+    mutualAuthentication()
     #sendData()

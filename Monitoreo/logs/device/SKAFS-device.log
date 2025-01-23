@@ -1,8 +1,45 @@
-2025-01-23 00:34:12,840 - INFO - IoT_Identity: 94845
-2025-01-23 00:34:12,846 - INFO - Desafíos recibidos del CA.
-2025-01-23 00:34:12,859 - INFO - Datos enviados y respuesta recibida del CA.
-2025-01-23 00:34:12,859 - INFO - Registro completado exitosamente con los siguientes parámetros: {'state': 27796, 'C_1': 74043, 'IoT_Identity': 94845, 'K_previous': 67346, 'T_j': 119425}
-2025-01-23 00:43:58,106 - INFO - IoT_Identity: 92861
-2025-01-23 00:43:58,114 - INFO - Desafíos recibidos del CA.
-2025-01-23 00:43:58,129 - INFO - Datos enviados y respuesta recibida del CA.
-2025-01-23 00:43:58,129 - INFO - Registro completado exitosamente con los siguientes parámetros: {'state': 44122, 'C_1': 58494, 'IoT_Identity': 92861, 'K_previous': 82748, 'T_j': 63444}
+2025-01-23 14:43:42,001 - INFO - IoT_Identity: 8564528679235501421
+2025-01-23 14:43:42,006 - INFO - Desafíos recibidos del CA.
+2025-01-23 14:43:42,019 - INFO - Datos enviados y respuesta recibida del CA.
+2025-01-23 14:43:42,019 - INFO - Registro completado exitosamente con los siguientes parámetros: {'state': 12967735848400230908, 'C_1': 17010669357748812950, 'IoT_Identity': 8564528679235501421, 'K_previous': 1208334862044400664443462995624466340427731732364421286364969143543366203051138037669981784580337159522947161839040586769868564919159508527804568575236889, 'T_j': 17113824469239343071}
+2025-01-23 14:43:42,020 - INFO - Conectado al Gateway en skafs-gateway:5000
+2025-01-23 14:43:42,021 - INFO - Mensaje 'hello' enviado al Gateway.
+2025-01-23 14:43:42,021 - INFO - Token de autenticación recibido: G_r_1=3164555495387391773.
+2025-01-23 14:43:42,021 - ERROR - Error inesperado: int too big to convert
+2025-01-23 14:43:42,021 - INFO - Socket con el Gateway cerrado correctamente.
+2025-01-23 14:47:15,017 - INFO - IoT_Identity: 1374156714555342642
+2025-01-23 14:47:15,022 - INFO - Desafíos recibidos del CA.
+2025-01-23 14:47:15,035 - INFO - Datos enviados y respuesta recibida del CA.
+2025-01-23 14:47:15,035 - INFO - Registro completado exitosamente con los siguientes parámetros: {'state': 6641744162517484623, 'C_1': 15651212374444449958, 'IoT_Identity': 1374156714555342642, 'K_previous': 9644125339030827051, 'T_j': 3622607677333103306}
+2025-01-23 14:47:15,036 - INFO - Conectado al Gateway en skafs-gateway:5000
+2025-01-23 14:47:15,037 - INFO - Mensaje 'hello' enviado al Gateway.
+2025-01-23 14:47:15,037 - INFO - Token de autenticación recibido: G_r_1=7428724971919385717.
+2025-01-23 14:47:15,037 - ERROR - Error inesperado: int too big to convert
+2025-01-23 14:47:15,038 - INFO - Socket con el Gateway cerrado correctamente.
+2025-01-23 14:47:55,238 - INFO - IoT_Identity: 9938503049987307248
+2025-01-23 14:47:55,245 - INFO - Desafíos recibidos del CA.
+2025-01-23 14:47:55,257 - INFO - Datos enviados y respuesta recibida del CA.
+2025-01-23 14:47:55,257 - INFO - Registro completado exitosamente con los siguientes parámetros: {'state': 12902047142989763434, 'C_1': 7619685380411018713, 'IoT_Identity': 9938503049987307248, 'K_previous': 12344975056113171358, 'T_j': 3622607677333103306}
+2025-01-23 14:47:55,258 - INFO - Conectado al Gateway en skafs-gateway:5000
+2025-01-23 14:47:55,260 - INFO - Mensaje 'hello' enviado al Gateway.
+2025-01-23 14:47:55,260 - INFO - Token de autenticación recibido: G_r_1=4020253477149430881.
+2025-01-23 14:47:55,261 - ERROR - Error inesperado: int too big to convert
+2025-01-23 14:47:55,261 - INFO - Socket con el Gateway cerrado correctamente.
+2025-01-23 14:52:52,954 - INFO - IoT_Identity: 8420755666116738173
+2025-01-23 14:52:52,960 - INFO - Desafíos recibidos del CA.
+2025-01-23 14:52:52,972 - INFO - Datos enviados y respuesta recibida del CA.
+2025-01-23 14:52:52,972 - INFO - Registro completado exitosamente con los siguientes parámetros: {'state': 16355820532601701602, 'C_1': 14917258709646968190, 'IoT_Identity': 8420755666116738173, 'K_previous': 15491209571316878023, 'T_j': 822337520433875367}
+2025-01-23 14:52:52,973 - INFO - Conectado al Gateway en skafs-gateway:5000
+2025-01-23 14:52:52,974 - INFO - Mensaje 'hello' enviado al Gateway.
+2025-01-23 14:52:52,974 - INFO - Token de autenticación recibido: G_r_1=7188960119295686436.
+2025-01-23 14:52:52,975 - ERROR - Error inesperado: int too big to convert
+2025-01-23 14:52:52,975 - INFO - Socket con el Gateway cerrado correctamente.
+2025-01-23 14:53:50,855 - INFO - IoT_Identity: 3448669815161871889
+2025-01-23 14:53:50,859 - INFO - Desafíos recibidos del CA.
+2025-01-23 14:53:50,871 - INFO - Datos enviados y respuesta recibida del CA.
+2025-01-23 14:53:50,871 - INFO - Registro completado exitosamente con los siguientes parámetros: {'state': 13099578475814203251, 'C_1': 16255774736345938157, 'IoT_Identity': 3448669815161871889, 'K_previous': 12641137471683002451, 'T_j': 822337520433875367}
+2025-01-23 14:53:50,872 - INFO - Conectado al Gateway en skafs-gateway:5000
+2025-01-23 14:53:50,873 - INFO - Mensaje 'hello' enviado al Gateway.
+2025-01-23 14:53:50,873 - INFO - Token de autenticación recibido: G_r_1=14797847049471466066.
+2025-01-23 14:53:50,873 - ERROR - Error inesperado: int too big to convert
+2025-01-23 14:53:50,874 - INFO - Socket con el Gateway cerrado correctamente.

@@ -3,6 +3,7 @@ import logging
 import random
 import socket
 import json
+import base64
 import os
 
 from common.cripto_primitivas import *
@@ -28,13 +29,13 @@ HOST = "0.0.0.0"  # Dirección IP del Gateway
 PORT = 5000         # Puerto del Gateway
 CA_HOST = "skafs-cloud"      # Dirección de la CA
 CA_PORT = 5001             # Puerto de la CA
+cloud_socket = None
 
 # Identidad única de la CA
 CA_Identity = None
 
 # Parámetros de registro
 registration_parameters = {}
-
 
 #######################################################
 #               SERVIDOR SOCKET GATEWAY               #
@@ -61,7 +62,7 @@ def registrationGateway():
     global registration_parameters, CA_Identity
     
     # Paso 1: Generar y enviar ID del gateway
-    Gateway_Identity = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000  
+    Gateway_Identity = int.from_bytes(os.urandom(8), 'little') %P256.q 
     logger.info(f"Gateway_Identity: {Gateway_Identity}")
     
     try:
@@ -128,7 +129,7 @@ def handleMutualAuthentication(device_sock):
         logger.info(f"Mensaje recibido del IoT Device: {IoT_HelloMsg}")
 
         # Paso 2: Generar r_1 y enviarlo al dispositivo IoT
-        G_r_1 = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000  
+        G_r_1 = int.from_bytes(os.urandom(8), 'little')%P256.q 
         payload = {"G_r_1": G_r_1}
         device_sock.sendall(json.dumps(payload).encode('utf-8'))
         logger.info(f"PASO 2: r_1 generado y enviado al dispositivo IoT: {G_r_1}")
@@ -142,12 +143,15 @@ def handleMutualAuthentication(device_sock):
         logger.info(f"PASO 3: Datos recibidos del IoT Device: {payload_reduced}")
             
         # Paso 4: Generar parámetros de autenticación y enviarlos a la CA
-        G_nonce = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000  
+        
+        # Inicializar el socket persistente con la CA
+        initialize_socket()
+        
+        G_nonce = int.from_bytes(os.urandom(64), 'little') 
         logger.info(f"PASO 4: registration_parameters: {registration_parameters}")
         G_MK_G_CA = registration_parameters["G_MK_G_CA"]
         Gateway_Identity = registration_parameters["Gateway_Identity"]
         G_Sync_K_G_CA = registration_parameters["G_Sync_K_G_CA"]
-        logger.info(f"PASO 4: generateSigma1Sigma2Epison1: {G_nonce}, {G_MK_G_CA}, {Gateway_Identity}, {G_Sync_K_G_CA}, {G_r_1}, {payload_reduced}")
         returnData = generateSigma1Sigma2Epison1(
             G_nonce, G_MK_G_CA, Gateway_Identity, G_Sync_K_G_CA, G_r_1, payload_reduced
         )
@@ -166,8 +170,9 @@ def handleMutualAuthentication(device_sock):
             "Epison_1_5": message[6],
             "iv": iv.hex(),
         }
-        ca_response = sendReceiveData(CA_HOST, CA_PORT, payload)
-        logger.info("Parámetros enviados a la CA para autenticación mutua.")
+        logger.info(f"PASO 4: payload={payload}")
+        ca_response = send_and_receive_persistent_socket(payload)
+        logger.info("PASO 4: Parámetros enviados a la CA para autenticación mutua.")
 
         # Paso 5: Recibir respuesta de la CA
         if not all(key in ca_response for key in ["CA_sigma_3", "Epison_2_1", "Epison_2_2", "Epison_2_3", "Epison_2_4", "D_sync_CA_G"]):
@@ -178,7 +183,7 @@ def handleMutualAuthentication(device_sock):
         Epison_2_3 = ca_response["Epison_2_3"]
         Epison_2_4 = ca_response["Epison_2_4"]
         D_sync_CA_G = ca_response["D_sync_CA_G"]
-        logger.info("Claves y parámetros de sincronización recibidos de la CA.")
+        logger.info("PASO 5: Claves y parámetros de sincronización recibidos de la CA.")
 
         # Paso 6: Enviar G_M_2 y Sync_IoT_G al dispositivo IoT
         returnData = checkingSynchronizationBetGatewayIoT(
@@ -213,7 +218,7 @@ def handleMutualAuthentication(device_sock):
 
         # Paso 8: Enviar Epison_3_1 a la CA
         payload = {"Epison_3_1": Epison_3_1}
-        ca_response = sendReceiveData(CA_HOST, CA_PORT, payload)
+        ca_response = send_and_receive_persistent_socket(payload)
         logger.info("Epison_3_1 enviado a la CA.")
 
         # Paso 9: Recibir M_3 de la CA
@@ -235,6 +240,7 @@ def handleMutualAuthentication(device_sock):
         logger.error(f"Error inesperado durante la autenticación mutua: {e}")
     finally:
         device_sock.close()
+        close_socket() 
 
 def generateSigma1Sigma2Epison1(G_nonce,G_MK_G_CA,Gateway_Identity,G_Sync_K_G_CA, G_r_1, IoT_M1):
     G_sigma_1=Hash(G_MK_G_CA,Gateway_Identity,G_nonce)
@@ -242,36 +248,32 @@ def generateSigma1Sigma2Epison1(G_nonce,G_MK_G_CA,Gateway_Identity,G_Sync_K_G_CA
 
     iv = Random.new().read(AES.block_size)
     h = hashlib.new('sha256')
-    h.update(G_Sync_K_G_CA.to_bytes(32, 'big'))
+    h.update(G_Sync_K_G_CA.to_bytes(32, 'little'))
     HashResult=bytes(h.hexdigest(),'utf-8')
-
-    logger.info(f"generateSigma1Sigma2Epison1 IoT_M1:{IoT_M1}")  
     
-    IoT_ID_obfusacted=IoT_M1[1]
-    IoT_r_2_obfuscated=IoT_M1[2]
-    IoT_r_3_obfuscated=IoT_M1[4]
-    IoT_K_i_obfuscated=IoT_M1[3]
-    
-    logger.info(f"generateSigma1Sigma2Epison1 IoT_ID_obfusacted:{IoT_ID_obfusacted}, IoT_r_2_obfuscated:{IoT_r_2_obfuscated}, IoT_r_3_obfuscated:{IoT_r_3_obfuscated}, IoT_K_i_obfuscated:{IoT_K_i_obfuscated}")
-    
+    IoT_ID_obfusacted=IoT_M1["ID*"]
+    IoT_r_2_obfuscated=IoT_M1["r_2*"]
+    IoT_r_3_obfuscated=IoT_M1["r_3*"]
+    IoT_K_i_obfuscated=IoT_M1["K_i*"]
+        
     ENC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    Epison_1_1=ENC.encrypt(IoT_ID_obfusacted.to_bytes(32,'big'))
+    Epison_1_1=ENC.encrypt(IoT_ID_obfusacted.to_bytes(32,'little'))
     logger.info(f"Epison_1_1: {Epison_1_1}")
     
     ENC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    Epison_1_2=ENC.encrypt(IoT_r_2_obfuscated.to_bytes(32,'big'))
+    Epison_1_2=ENC.encrypt(IoT_r_2_obfuscated.to_bytes(32,'little'))
     logger.info(f"Epison_1_2: {Epison_1_2}")
 
     ENC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    Epison_1_3=ENC.encrypt(IoT_r_3_obfuscated.to_bytes(32,'big'))
+    Epison_1_3=ENC.encrypt(IoT_r_3_obfuscated.to_bytes(32,'little'))
     logger.info(f"Epison_1_3: {Epison_1_3}")
 
     ENC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    Epison_1_4=ENC.encrypt(G_r_1.to_bytes(32,'big'))
+    Epison_1_4=ENC.encrypt(G_r_1.to_bytes(32,'little'))
     logger.info(f"Epison_1_4: {Epison_1_4}")
 
     ENC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    Epison_1_5=ENC.encrypt(IoT_K_i_obfuscated.to_bytes(32,'big'))
+    Epison_1_5=ENC.encrypt(IoT_K_i_obfuscated.to_bytes(32,'little'))
     logger.info(f"Epison_1_5: {Epison_1_5}")
 
     return Gateway_Identity, G_nonce, G_sigma_1, G_sigma_2, Epison_1_1, Epison_1_2, Epison_1_3, Epison_1_4, Epison_1_5, iv, HashResult
@@ -289,16 +291,16 @@ def checkingSynchronizationBetGatewayIoT(data, G_nonce, IoT_M_1, G_r_1, iv,HashR
     IoT_r_3_obfuscated= IoT_M_1[4]
 
     DEC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    G_K_before_previous=int.from_bytes(DEC.decrypt(Epison_2_1),'big')
+    G_K_before_previous=int.from_bytes(DEC.decrypt(Epison_2_1),'little')
 
     DEC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    G_K_previous=int.from_bytes(DEC.decrypt(Epison_2_2),'big')
+    G_K_previous=int.from_bytes(DEC.decrypt(Epison_2_2),'little')
 
     DEC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    G_K_current=int.from_bytes(DEC.decrypt(Epison_2_3),'big')
+    G_K_current=int.from_bytes(DEC.decrypt(Epison_2_3),'little')
 
     DEC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    G_r_1_previous=int.from_bytes(DEC.decrypt(Epison_2_4),'big')
+    G_r_1_previous=int.from_bytes(DEC.decrypt(Epison_2_4),'little')
 
     G_Sync_K_G_CA_previous = registration_parameters["G_Sync_K_G_CA_previous"]
     G_MK_G_CA = registration_parameters["G_MK_G_CA"]
@@ -330,7 +332,7 @@ def gettingEncryptingNextSessionKey(IoT_K_i_next_obfuscated, iv, HashResult, G_K
     # IoT_K_i_next_obfuscated
     G_IoT_K_i_next=IoT_K_i_next_obfuscated^G_K_a
     ENC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    Epison_3_1=ENC.encrypt(G_IoT_K_i_next.to_bytes(32,'big'))
+    Epison_3_1=ENC.encrypt(G_IoT_K_i_next.to_bytes(32,'little'))
 
     return Epison_3_1, G_IoT_K_i_next
 
@@ -358,16 +360,82 @@ def updatingSynchronizationKeys(CA_M3, G_r_1, IoT_r_3, G_K_previous,G_K_current,
 #                      AUXILIARES                     #
 #######################################################
 
-def sendReceiveData(host, port, message):
+def initialize_socket():
     """
-    Enviar un mensaje mediante socket y recibir la respuesta.
+    Inicializa un socket persistente para comunicarse con el CA.
     """
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.connect((host, port))
-        sock.sendall(json.dumps(message).encode('utf-8'))  # Enviar mensaje
-        response = sock.recv(4096)                         # Recibir respuesta
-        return json.loads(response.decode('utf-8'))        # Decodificar y retornar respuesta
+    global cloud_socket
+    if cloud_socket is None:
+        try:
+            cloud_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            cloud_socket.connect((CA_HOST, CA_PORT))
+            logger.info(f"Conectado al CA en {CA_HOST}:{CA_PORT}")
+        except socket.error as e:
+            logger.error(f"Error al conectar con el CA: {e}")
+            cloud_socket = None
+            raise e
+        
+def close_socket():
+    """
+    Cierra el socket persistente.
+    """
+    global cloud_socket
+    if cloud_socket:
+        try:
+            cloud_socket.close()
+            logger.info("Socket con el CA cerrado correctamente.")
+        except socket.error as e:
+            logger.error(f"Error al cerrar el socket: {e}")
+        finally:
+            cloud_socket = None
+
+def send_and_receive_persistent_socket(message_dict):
+    """
+    Enviar un mensaje al CA utilizando un socket persistente y recibir la respuesta.
+    """
+    global cloud_socket
+    try:
+        if cloud_socket is None:
+            initialize_socket()
+        encoded_message = {}
+        for key in message_dict:
+            value = message_dict[key]
+            if isinstance(value, bytes):
+                encoded_message[key] = base64.b64encode(value).decode('utf-8')  # Convertir bytes a base64 y luego a str
+            else:
+                encoded_message[key] = value
+        logger.info(f"send_and_receive_persistent_socket- encoded_message={encoded_message}")
+        cloud_socket.sendall(json.dumps(encoded_message).encode('utf-8'))  # Enviar mensaje
+        
+        response = cloud_socket.recv(4096)                        # Recibir respuesta
+        received_message_dict = json.loads(response.decode('utf-8')) 
+        decoded_response = {}
+        for key in received_message_dict:
+            value = received_message_dict[key]
+            try:
+                decoded_response [key] = base64.b64decode(value) if isinstance(value, str) else value
+            except ValueError:
+                decoded_response [key] = value  # Si no es base64, se retorna como está
+        logger.info(f"send_and_receive_persistent_socket- decoded_response={decoded_response}")
+        return decoded_response
+    except socket.error as e:
+        logger.error(f"Error en la comunicación por socket persistente: {e}")
+        cloud_socket = None  # Marcar el socket como no válido
+        raise e
     
+def encode_message(message):
+    """
+    Convierte un mensaje en un formato JSON serializable.
+    Los objetos de tipo bytes se codifican en base64.
+    """
+    def encode_item(item):
+        if isinstance(item, bytes):
+            return base64.b64encode(item).decode('utf-8')  # Convertir bytes a base64 y luego a str
+        return item
+
+    # Recorre y codifica cada elemento del mensaje
+    return [encode_item(item) for item in message]
+
 def sendData():
     while True:
         sensor_data = {"GTW-temperature": random.uniform(20.0, 30.0), "GTW-humidity": random.uniform(50, 70)}
@@ -382,7 +450,7 @@ if __name__ == '__main__':
     #logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8010.")
     #start_http_server(8010, addr="0.0.0.0")
     registrationGateway()
-    #startGatewayServer()
+    startGatewayServer()
     #sendData()
     
     
