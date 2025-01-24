@@ -22,9 +22,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("Gateway")
 
-# API expuesto para el CA
-CA_URL = "http://skafs-cloud:8001"
-
 # Configuración del servidor socket
 HOST = "0.0.0.0"  # Dirección IP del Gateway
 PORT = 5000         # Puerto del Gateway
@@ -61,54 +58,61 @@ def startGatewayServer():
             
 def registrationGateway():
     global registration_parameters, CA_Identity
-    
-    # Paso 1: Generar y enviar ID del gateway
-    Gateway_Identity = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000 
-    logger.info(f"[REG] Gateway_Identity: {Gateway_Identity}")
-    
+       
     try:
-        response = requests.post(
-            f"{CA_URL}/registration/gateway",
-            json={"Gateway_Identity": Gateway_Identity}
-        )
-        response.raise_for_status()
-        logger.info("[REG] Enviado Gateway_Identity al CA.")
-    except requests.RequestException as e:
-        logger.error(f"[REG] Error al enviar Gateway_Identity al CA: {e}")
-        return
+        # Inicializar el socket con el CA
+        initialize_socket()
+        
+        # Paso 1: Generar y enviar ID del gateway
+        Gateway_Identity = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000 
+        logger.info(f"[REG] Gateway_Identity: {Gateway_Identity}")
+        
+         # Crear el mensaje a enviar
+        request_payload = {"operation": "register_gateway", "Gateway_Identity": Gateway_Identity}
+        logger.info("[REG] Enviando Gateway_Identity al CA...")
+        
+        # Enviar el mensaje y esperar respuesta
+        response_payload = send_and_receive_persistent_socket(request_payload)
+        logger.info("[REG] Respuesta recibida del CA.")
+        
+        # Paso 2: Procesar respuesta del CA
+        CA_Identity = response_payload["CA_Identity"]
+        CA_MK_G_CA = response_payload["CA_MK_G_CA"]
+        CA_Sync_K_G_CA_previous = response_payload["CA_Sync_K_G_CA_previous"]
+        CA_r_1_previous = response_payload["CA_r_1_previous"]
     
-    # Paso 2: Recibir CA_MK_G_CA, CA_Sync_K_G_CA_previous, CA_r_1_previous
-    try:
-        response_data = response.json()
-        CA_Identity = response_data["CA_Identity"]
-        CA_MK_G_CA = response_data["CA_MK_G_CA"]
-        CA_Sync_K_G_CA_previous = response_data["CA_Sync_K_G_CA_previous"]
-        CA_r_1_previous = response_data["CA_r_1_previous"]
-        logger.info("[REG] Recibidos parámetros del CA para el Gateway.")
-    except KeyError as e:
-        logger.error(f"[REG] Parámetro faltante en la respuesta del CA: {e}")
-        return
-    except requests.RequestException as e:
-        logger.error(f"[REG] Error al recibir datos del CA: {e}")
-        return
+        if None in (CA_Identity, CA_MK_G_CA, CA_Sync_K_G_CA_previous, CA_r_1_previous):
+            raise ValueError("Datos faltantes en la respuesta del CA.")
+
+        logger.info("[REG] Parámetros recibidos del CA para el Gateway.")
     
-    # Calcular claves derivadas en el Gateway
-    G_MK_G_CA = CA_MK_G_CA
-    G_Sync_K_G_CA_previous = CA_Sync_K_G_CA_previous
-    G_r_1_previous = CA_r_1_previous
-    G_Sync_K_G_CA = Hash(G_Sync_K_G_CA_previous, G_r_1_previous)
-    logger.info(f"[REG] Claves calculadas en el Gateway: G_Sync_K_G_CA={G_Sync_K_G_CA}")
-    
-    # Paso 3: Guardar G_MK_G_CA
-    registration_parameters = {
-        "Gateway_Identity": Gateway_Identity,
-        "G_MK_G_CA": G_MK_G_CA,
-        "G_Sync_K_G_CA_previous": G_Sync_K_G_CA_previous,
-        "G_r_1_previous": G_r_1_previous,
-        "G_Sync_K_G_CA": G_Sync_K_G_CA,
-        "Sync_IoT_G": 0
-    }
-    logger.info(f"[REG] Registro completado exitosamente con los siguientes parámetros: {registration_parameters}")
+        # Calcular claves derivadas en el Gateway
+        G_MK_G_CA = CA_MK_G_CA
+        G_Sync_K_G_CA_previous = CA_Sync_K_G_CA_previous
+        G_r_1_previous = CA_r_1_previous
+        G_Sync_K_G_CA = Hash(G_Sync_K_G_CA_previous, G_r_1_previous)
+        logger.info(f"[REG] Claves derivadas calculadas: G_Sync_K_G_CA={G_Sync_K_G_CA}")
+
+        # Paso 3: Guardar los parámetros en la configuración del Gateway
+        registration_parameters = {
+            "Gateway_Identity": Gateway_Identity,
+            "G_MK_G_CA": G_MK_G_CA,
+            "G_Sync_K_G_CA_previous": G_Sync_K_G_CA_previous,
+            "G_r_1_previous": G_r_1_previous,
+            "G_Sync_K_G_CA": G_Sync_K_G_CA,
+            "Sync_IoT_G": 0
+        }
+        logger.info("[REG] Registro completado exitosamente.")
+        
+    except socket.error as e:
+        logger.error(f"[REG] Error de comunicación con el CA: {e}")
+        close_socket()
+    except ValueError as e:
+        logger.error(f"[REG] Error en la respuesta del CA: {e}")
+        close_socket()
+    except Exception as e:
+        logger.error(f"[REG] Error inesperado: {e}")
+        close_socket()
 
 #######################################################
 #                 AUTENTICACIÓN MUTUA                 #
@@ -143,9 +147,6 @@ def handleMutualAuthentication(device_sock):
         logger.info(f"[AUTH] Datos recibidos del IoT Device: {IoT_M1}")
             
         # Paso 4: Generar parámetros de autenticación y enviarlos a la CA
-        
-        # Inicializar el socket persistente con la CA
-        initialize_socket()
         G_nonce = int.from_bytes(os.urandom(1024),'big') % 90000 + 10000 
         logger.info(f"[AUTH] registration_parameters: {registration_parameters}")
         G_MK_G_CA = registration_parameters["G_MK_G_CA"]
@@ -158,6 +159,7 @@ def handleMutualAuthentication(device_sock):
         HashResult = returnData[10]
         message = returnData[:10]
         payload = {
+            "operation": "mutual_authentication",
             "Gateway_Identity": message[0],
             "G_nonce": message[1],
             "G_sigma_1": message[2],
@@ -170,6 +172,7 @@ def handleMutualAuthentication(device_sock):
             #"iv": iv.hex(),
             "iv": iv
         }
+        
         ca_response = send_and_receive_persistent_socket(payload)
         logger.info("[AUTH] Parámetros enviados a la CA para autenticación mutua.")
 
@@ -395,7 +398,7 @@ def send_and_receive_persistent_socket(message_dict):
                 encoded_message[key] = base64.b64encode(value).decode('utf-8')  # Convertir bytes a base64 y luego a str
             else:
                 encoded_message[key] = value
-        #logger.info(f"send_and_receive_persistent_socket- encoded_message={encoded_message}")
+        logger.info(f"send_and_receive_persistent_socket- encoded_message={encoded_message}")
         cloud_socket.sendall(json.dumps(encoded_message).encode('utf-8'))  # Enviar mensaje
         
         response = cloud_socket.recv(4096)                        # Recibir respuesta

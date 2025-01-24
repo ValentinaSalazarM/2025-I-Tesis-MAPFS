@@ -23,12 +23,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger("Device")
 
-# API expuesto para el CA
-CA_URL = "http://skafs-cloud:8001"
-
 # Configuración del socket
 GATEWAY_HOST = 'skafs-gateway'  # Dirección IP del Gateway
 GATEWAY_PORT = 5000         # Puerto del Gateway
+
+CA_HOST = "skafs-cloud"      # Dirección de la CA
+CA_PORT = 5001             # Puerto de la CA
+
 gateway_socket = None
 
 # Retos fijos para el circuito PUF
@@ -42,64 +43,89 @@ registration_parameters = {}
 #              REGISTRO DISPOSITIVO IOT               #
 #######################################################         
 def registrationIoT():
+    """
+    Registro del dispositivo IoT utilizando comunicación por sockets.
+    """
     global registration_parameters, C_F0, C_F1
-    
-    # Generación de DPUF challenge y estado
-    C_1 = int.from_bytes(os.urandom(1024), 'big')  % 90000 + 10000  
-    state = int.from_bytes(os.urandom(1024), 'big')  % 90000 + 10000  
 
-    # Generación de la identidad del IoT
-    IoT_Identity = int.from_bytes(os.urandom(1024), 'big')  % 90000 + 10000  
-
-    logger.info(f"[REG] IoT_Identity: {IoT_Identity}")
-    
-    # Paso 1: Recepción de desafíos desde el CA
     try:
-        response = requests.get(f"{CA_URL}/registration/challenges")
-        response.raise_for_status()
-        challenges = response.json()
-        C_F0 = challenges['C_F0']
-        C_F1 = challenges['C_F1']
-        logger.info("[REG] Desafíos recibidos del CA.")
-    except requests.RequestException as e:
-        logger.error(f"[REG] Error al recibir desafíos del CA: {e}")
-        return
-    
-    # Cálculo de las funciones FPUF y DPUF
-    FPUF_Fixed_F0 = FPUF(C_F0)
-    FPUF_Fixed_F1 = FPUF(C_F1)
-    DPUF_C1 = DPUF(C_1, state)
+        # Configuración del socket para comunicarse con el CA
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.connect((CA_HOST, CA_PORT))
+            logger.info(f"[REG] Conectado al CA en {CA_HOST}:{CA_PORT}")
 
-    # Paso 2: Envío de datos al CA
-    try:
-        payload = {
-            "IoT_Identity": IoT_Identity,
-            "DPUF_C1": DPUF_C1,
-            "FPUF_Fixed_F0": FPUF_Fixed_F0,
-            "FPUF_Fixed_F1": FPUF_Fixed_F1
-        }
-        response = requests.post(f"{CA_URL}/registration/device", json=payload)
-        response.raise_for_status()
-        response_data = response.json()
-        CA_K_previous = response_data["CA_K_previous"]
-        T_j = response_data["IoT_T_j"]
-        logger.info("[REG] Datos enviados y respuesta recibida del CA.")
-    except requests.RequestException as e:
-        logger.error(f"[REG] Error al enviar datos al CA: {e}")
-        return
-    
-    # Inicialización de los parámetros en el IoT device
-    K_previous = CA_K_previous
-    
-    # Guardar los parámetros de registro
-    registration_parameters = {
-        "state": state,
-        "C_1": C_1,
-        "IoT_Identity": IoT_Identity,
-        "K_previous": K_previous,
-        "T_j": T_j
-    }
-    logger.info(f"[REG] Registro completado exitosamente con los siguientes parámetros: {registration_parameters}")
+            # Generación de DPUF challenge y estado
+            C_1 = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000
+            state = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000
+
+            # Generación de la identidad del IoT
+            IoT_Identity = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000
+            logger.info(f"[REG] IoT_Identity generado: {IoT_Identity}")
+
+            # Paso 1: Solicitar desafíos al CA
+            initial_request = {"operation": "register_device"}
+            sock.sendall(json.dumps(initial_request).encode('utf-8'))
+            logger.info("[REG] Enviada solicitud de registro al CA.")
+
+            # Recibir desafíos C_F0 y C_F1
+            data = sock.recv(4096)
+            if not data:
+                logger.error("[REG] No se recibieron desafíos del CA.")
+                return
+            challenges = json.loads(data.decode('utf-8'))
+            C_F0 = challenges.get("C_F0")
+            C_F1 = challenges.get("C_F1")
+            if C_F0 is None or C_F1 is None:
+                raise KeyError("Faltan desafíos C_F0 o C_F1 en la respuesta del CA.")
+            logger.info("[REG] Desafíos recibidos del CA.")
+
+            # Cálculo de las funciones FPUF y DPUF
+            FPUF_Fixed_F0 = FPUF(C_F0)
+            FPUF_Fixed_F1 = FPUF(C_F1)
+            DPUF_C1 = DPUF(C_1, state)
+
+            # Paso 2: Enviar datos calculados al CA
+            payload = {
+                "operation": "register_device",
+                "IoT_Identity": IoT_Identity,
+                "DPUF_C1": DPUF_C1,
+                "FPUF_Fixed_F0": FPUF_Fixed_F0,
+                "FPUF_Fixed_F1": FPUF_Fixed_F1,
+            }
+            sock.sendall(json.dumps(payload).encode('utf-8'))
+            logger.info("[REG] Datos enviados al CA.")
+
+            # Paso 3: Recibir respuesta del CA
+            data = sock.recv(4096)
+            if not data:
+                logger.error("[REG] No se recibió respuesta del CA.")
+                return
+            response = json.loads(data.decode('utf-8'))
+            CA_K_previous = response.get("CA_K_previous")
+            T_j = response.get("IoT_T_j")
+            if CA_K_previous is None or T_j is None:
+                raise KeyError("Faltan datos en la respuesta del CA.")
+            logger.info("[REG] Respuesta recibida del CA.")
+
+            # Inicialización de los parámetros en el IoT device
+            K_previous = CA_K_previous
+
+            # Guardar los parámetros de registro
+            registration_parameters = {
+                "state": state,
+                "C_1": C_1,
+                "IoT_Identity": IoT_Identity,
+                "K_previous": K_previous,
+                "T_j": T_j
+            }
+            logger.info(f"[REG] Registro completado exitosamente con los siguientes parámetros: {registration_parameters}")
+
+    except KeyError as e:
+        logger.error(f"[REG] Clave faltante: {e}")
+    except socket.error as e:
+        logger.error(f"[REG] Error en la comunicación por socket: {e}")
+    except Exception as e:
+        logger.error(f"[REG] Error inesperado durante el registro: {e}")
 
 #######################################################
 #                 AUTENTICACIÓN MUTUA                 #

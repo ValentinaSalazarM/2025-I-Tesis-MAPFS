@@ -1,15 +1,11 @@
 import binascii
 import requests
 import logging
-import uvicorn
 import socket
 import base64
 import json
 import os
 import threading
-
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 
 from common.cripto_primitivas import *
 
@@ -25,9 +21,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("Cloud")
-
-# Creación de la aplicación FastAPI
-app = FastAPI()
 
 # Configuración del servidor socket para que acepte conexiones desde otros contenedores
 HOST = "0.0.0.0"  
@@ -57,124 +50,173 @@ Gateway_Identity = None
 
 def startSocket():
     """
-    Inicia el servidor socket para manejar conexiones del Gateway.
+    Inicia el servidor socket para manejar conexiones del Gateway y del Device.
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
         server_socket.bind((HOST, PORT))
         server_socket.listen(5)
-        logger.info(f"Socket Cloud escuchando en {HOST}:{PORT}")
+        logger.info(f"Servidor Cloud escuchando en {HOST}:{PORT}")
 
         while True:
-            gateway_socket, addr = server_socket.accept()
+            client_socket, addr = server_socket.accept()
             logger.info(f"Conexión aceptada de {addr}")
-            handleMutualAuthentication(gateway_socket)
+            handleClientConnection(client_socket)
 
-def startApiServer():
+def handleClientConnection(client_socket):
     """
-    Inicia el servidor de la API con Uvicorn.
+    Maneja las conexiones entrantes y redirige a la función adecuada.
     """
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    try:
+        # Recibir datos del cliente
+        data = client_socket.recv(4096)
+        if not data:
+            logger.error("No se recibieron datos del cliente.")
+            return
+
+        # Decodificar el mensaje
+        message = decode_message(json.loads(data.decode('utf-8')))
+        logger.info(f"Mensaje recibido: {message}")
+
+        # Verificar el tipo de operación
+        operation = message.get("operation")
+        if not operation:
+            raise ValueError("Falta el campo 'operation' en el mensaje recibido.")
+
+        # Redirigir a la función correspondiente
+        if operation == "register_gateway":
+            handleGatewayRegistration(client_socket, message)
+        elif operation == "register_device":
+            handleIoTRegistration(client_socket, message)
+        elif operation == "mutual_authentication":
+            handleMutualAuthentication(client_socket, message)
+        else:
+            raise ValueError(f"Operación desconocida: {operation}")
+
+    except ValueError as e:
+        logger.error(f"Error en el mensaje recibido: {e}")
+    except Exception as e:
+        logger.error(f"Error durante el manejo de la conexión: {e}")
+    finally:
+        client_socket.close()
+        logger.info("Conexión con el cliente cerrada.")
+
 
 #######################################################
 #              REGISTRO DISPOSITIVO IOT               #
 #######################################################
 
-# Modelos de datos para FastAPI
-class IoTRegistrationRequest(BaseModel):
-    IoT_Identity: int
-    DPUF_C1: int
-    FPUF_Fixed_F0: int
-    FPUF_Fixed_F1: int
-
-class IoTRegistrationResponse(BaseModel):
-    CA_K_previous: int
-    IoT_T_j: int
-
-@app.get("/registration/challenges")
-async def sendChallenges():
+def handleIoTRegistration(client_socket, message):
     """
-    Endpoint para enviar los desafíos C_F0 y C_F1 al dispositivo IoT.
-    """
-    logger.info("[REG Dispositivo] Enviando desafíos C_F0 y C_F1 al dispositivo IoT.")
-    return {"C_F0": C_F0, "C_F1": C_F1}
-
-@app.post("/registration/device")
-async def registerDevice(data: IoTRegistrationRequest):
-    """
-    Recibir información del dispositivo IoT, calcular IoT_T_j, y gestionar variables CA_K.
+    Manejar el registro del dispositivo IoT.
     """
     global registered_devices, device_keys, IoT_Identity
 
-    IoT_Identity = data.IoT_Identity
-    DPUF_C1 = data.DPUF_C1
-    FPUF_Fixed_F0 = data.FPUF_Fixed_F0
-    FPUF_Fixed_F1 = data.FPUF_Fixed_F1
+    try:
+        logger.info("[REG Dispositivo] Enviando desafíos C_F0 y C_F1 al dispositivo IoT.")
+        
+        # Enviar los desafíos al dispositivo
+        challenges = {"C_F0": C_F0, "C_F1": C_F1}
+        client_socket.sendall(json.dumps(encode_message(challenges)).encode('utf-8'))
 
-    # Verificar si el dispositivo ya está registrado
-    if IoT_Identity in registered_devices:
-        logger.warning(f"[REG Dispositivo] El dispositivo con ID {IoT_Identity} ya está registrado.")
-        raise HTTPException(status_code=400, detail="El dispositivo ya está registrado.")
+        # Recibir datos del dispositivo IoT
+        data = client_socket.recv(4096)
+        if not data:
+            logger.error("[REG Dispositivo] No se recibieron datos del dispositivo IoT.")
+            return
 
-    logger.info(f"[REG Dispositivo] Recibidos datos del dispositivo IoT: IoT_Identity={IoT_Identity}, DPUF_C1={DPUF_C1}, FPUF_Fixed_F0={FPUF_Fixed_F0}, FPUF_Fixed_F1={FPUF_Fixed_F1}")
+        # Decodificar mensaje
+        message = decode_message(json.loads(data.decode('utf-8')))
+        logger.info(f"[REG Dispositivo] Mensaje recibido del dispositivo IoT: {message}")
 
-    # Cálculo de IoT_T_j
-    IoT_T_j = K ^ FPUF_Fixed_F0 ^ FPUF_Fixed_F1
+        # Validar los datos recibidos
+        IoT_Identity = message.get("IoT_Identity")
+        DPUF_C1 = message.get("DPUF_C1")
+        FPUF_Fixed_F0 = message.get("FPUF_Fixed_F0")
+        FPUF_Fixed_F1 = message.get("FPUF_Fixed_F1")
 
-    # Generar variables CA_K específicas para este dispositivo
-    CA_K_before_previous = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000 
-    CA_K_previous = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000 
-    CA_K_current = DPUF_C1  # Actualización con DPUF_C1 recibido
+        if None in (IoT_Identity, DPUF_C1, FPUF_Fixed_F0, FPUF_Fixed_F1):
+            raise KeyError("Faltan datos en el mensaje recibido para el registro del dispositivo IoT.")
 
-    # Registrar el dispositivo
-    registered_devices.append(IoT_Identity)
-    device_keys[IoT_Identity] = {
-        "IoT_T_j": IoT_T_j,
-        "CA_K_before_previous": CA_K_before_previous,
-        "CA_K_previous": CA_K_previous,
-        "CA_K_current": CA_K_current,
-    }
+        # Verificar si el dispositivo ya está registrado
+        if IoT_Identity in registered_devices:
+            logger.warning(f"[REG Dispositivo] El dispositivo con ID {IoT_Identity} ya está registrado.")
+            raise ValueError("El dispositivo ya está registrado.")
 
-    logger.info(f"[REG Dispositivo] Dispositivo IoT con ID {IoT_Identity} registrado exitosamente. Claves asociadas: {device_keys[IoT_Identity]}")
-    
-    # Respuesta al dispositivo IoT
-    return IoTRegistrationResponse(CA_K_previous=CA_K_previous, IoT_T_j=IoT_T_j)
+        logger.info(f"[REG Dispositivo] Recibidos datos del dispositivo IoT: IoT_Identity={IoT_Identity}, DPUF_C1={DPUF_C1}, FPUF_Fixed_F0={FPUF_Fixed_F0}, FPUF_Fixed_F1={FPUF_Fixed_F1}")
 
-@app.get("/registration/devices")
-async def listRegisteredDevices():
-    """
-    Endpoint para listar todas las identidades de sensores registrados.
-    """
-    logger.info("Listando dispositivos registrados.")
-    return {"registered_devices": registered_devices}
+        # Cálculo de IoT_T_j
+        IoT_T_j = K ^ FPUF_Fixed_F0 ^ FPUF_Fixed_F1
 
-@app.get("/registration/device/{iot_identity}")
-async def getDeviceInfo(iot_identity: int):
-    """
-    Endpoint para obtener las claves asociadas con un dispositivo específico.
-    """
-    if iot_identity not in registered_devices:
-        logger.warning(f"Intento de acceso a dispositivo no registrado con ID {iot_identity}.")
-        raise HTTPException(status_code=404, detail="Dispositivo no encontrado.")
-    
-    logger.info(f"Recuperando información para el dispositivo con ID {iot_identity}.")
-    return device_keys[iot_identity]
+        # Generar variables CA_K específicas para este dispositivo
+        CA_K_before_previous = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000
+        CA_K_previous = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000
+        CA_K_current = DPUF_C1  # Actualización con DPUF_C1 recibido
+
+        # Registrar el dispositivo
+        registered_devices.append(IoT_Identity)
+        device_keys[IoT_Identity] = {
+            "IoT_T_j": IoT_T_j,
+            "CA_K_before_previous": CA_K_before_previous,
+            "CA_K_previous": CA_K_previous,
+            "CA_K_current": CA_K_current,
+        }
+
+        logger.info(f"[REG Dispositivo] Dispositivo IoT con ID {IoT_Identity} registrado exitosamente. Claves asociadas: {device_keys[IoT_Identity]}")
+
+        # Preparar y enviar la respuesta al dispositivo IoT
+        response = {
+            "CA_K_previous": CA_K_previous,
+            "IoT_T_j": IoT_T_j
+        }
+        encoded_response = encode_message(response)
+        client_socket.sendall(json.dumps(encoded_response).encode('utf-8'))
+        logger.info("[REG Dispositivo] Respuesta enviada al dispositivo IoT.")
+
+    except KeyError as e:
+        logger.error(f"Clave faltante en los datos del dispositivo IoT: {e}")
+    except ValueError as e:
+        logger.error(f"Error en el registro del dispositivo IoT: {e}")
+        client_socket.sendall(json.dumps(encode_message({"error": str(e)})).encode('utf-8'))
+    except Exception as e:
+        logger.error(f"Error inesperado durante el registro del dispositivo IoT: {e}")
+    finally:
+        client_socket.close()
+        logger.info("[REG Dispositivo] Conexión con el dispositivo IoT cerrada.")
+
 
 #######################################################
 #                   REGISTRO GATEWAY                  #
 #######################################################
 
-# Definir un modelo de datos para el registro del Gateway
-class GatewayRegistrationRequest(BaseModel):
-    Gateway_Identity: int
-    
-@app.post("/registration/gateway")
-async def registerGateway(data: GatewayRegistrationRequest):
+def handleGatewayRegistration(client_socket, message):
+    """
+    Manejar el registro del Gateway.
+    """
+    try:
+        Gateway_Identity = message.get("Gateway_Identity")
+        if not Gateway_Identity:
+            raise KeyError("Falta Gateway_Identity en el mensaje recibido.")
+
+        # Registrar el Gateway
+        response = registerGateway(message)
+
+        # Codificar y enviar respuesta al Gateway
+        encoded_response = encode_message(response)
+        client_socket.sendall(json.dumps(encoded_response).encode('utf-8'))
+        logger.info(f"Gateway registrado con éxito: {Gateway_Identity}")
+
+    except KeyError as e:
+        logger.error(f"Clave faltante: {e}")
+    except Exception as e:
+        logger.error(f"Error durante el registro del Gateway: {e}")
+        
+def registerGateway(message):
     """
     Registrar el gateway y devolver los parámetros necesarios.
     """
     global registered_gateways, gateway_keys, Gateway_Identity
     
-    Gateway_Identity = data.Gateway_Identity
+    Gateway_Identity = message["Gateway_Identity"]
 
     # Generar parámetros específicos para el gateway
     CA_MK_G_CA = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000  
@@ -204,15 +246,12 @@ async def registerGateway(data: GatewayRegistrationRequest):
 #                 AUTENTICACIÓN MUTUA                 #
 #######################################################
 
-def handleMutualAuthentication(gateway_socket):
+def handleMutualAuthentication(gateway_socket, decoded_message):
     """
     Autenticación mutua del Gateway con la CA.
     """
     try:
         # Paso 1: Recibir datos del Gateway
-        data = gateway_socket.recv(4096)
-        received_message = json.loads(data.decode('utf-8'))
-        decoded_message = decode_message(received_message)
         logger.info(f"[AUTH] Recepción de datos del Gateway: {decoded_message}.")
         
         ReturnData = RetrieveR_2_ID(decoded_message)
@@ -264,7 +303,7 @@ def handleMutualAuthentication(gateway_socket):
         encoded_message = encode_message({"M_3": M_3})
         gateway_socket.sendall(json.dumps(encoded_message).encode('utf-8'))
         logger.info("[AUTH] Mensaje M_3 enviado al Gateway.")
-        
+        logger.info("[AUTH] Autenticación mutua culminada.")
     except KeyError as e:
         logger.error(f"Clave faltante en los datos recibidos: {e}")
     except Exception as e:
@@ -282,7 +321,7 @@ def RetrieveR_2_ID(data):
     Epison_1_4= data["Epison_1_4"]
     Epison_1_5= data["Epison_1_5"]
     iv= data["iv"]
-    
+  
     # Datos del registro del gateway
     CA_MK_G_CA = gateway_keys[Gateway_Identity]["CA_MK_G_CA"]
     CA_Sync_K_G_CA_previous = gateway_keys[Gateway_Identity]["CA_Sync_K_G_CA_previous"]
@@ -391,8 +430,11 @@ def decode_message(encoded_message_dict):
     for key, value in encoded_message_dict.items():
         if isinstance(value, str):  # Solo intentar decodificar cadenas
             try:
-                # Decodificar solo si es válido Base64
-                decoded_message[key] = base64.b64decode(value)
+                # Intentar decodificar si es válido Base64
+                if base64.b64encode(base64.b64decode(value)).decode('utf-8') == value:
+                    decoded_message[key] = base64.b64decode(value)
+                else:
+                    decoded_message[key] = value
             except (ValueError, binascii.Error):
                 # Si no es Base64, mantener el valor original
                 decoded_message[key] = value
@@ -408,13 +450,13 @@ if __name__ == "__main__":
     start_http_server(8011, addr="0.0.0.0")
 
     # Crear hilos para la API y el servidor de sockets
-    api_thread = threading.Thread(target=startApiServer)
+    # api_thread = threading.Thread(target=startApiServer)
     socket_thread = threading.Thread(target=startSocket)
 
     # Iniciar ambos hilos
-    api_thread.start()
+    #api_thread.start()
     socket_thread.start()
 
     # Esperar a que los hilos terminen
-    api_thread.join()
+    #api_thread.join()
     socket_thread.join()
