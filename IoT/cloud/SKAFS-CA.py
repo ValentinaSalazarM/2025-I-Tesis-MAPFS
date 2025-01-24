@@ -1,3 +1,4 @@
+import binascii
 import requests
 import logging
 import uvicorn
@@ -33,12 +34,12 @@ HOST = "0.0.0.0"
 PORT = 5001         
 
 # Generación de la identidad y la clave a largo plazo 
-CA_Identity = K = int.from_bytes(os.urandom(8), 'little') %P256.q
-K = int.from_bytes(os.urandom(8), 'little') %P256.q
+CA_Identity = K = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000 
+K = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000 
 
 # Generación de desafíos fija (C_F0, C_F1) simulando PUF
-C_F0 = int.from_bytes(os.urandom(8), 'little') %P256.q
-C_F1 = int.from_bytes(os.urandom(8), 'little') %P256.q
+C_F0 = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000 
+C_F1 = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000 
 
 # Lista global para almacenar los sensores registrados
 registered_devices = []
@@ -94,7 +95,7 @@ async def sendChallenges():
     """
     Endpoint para enviar los desafíos C_F0 y C_F1 al dispositivo IoT.
     """
-    logger.info("Enviando desafíos C_F0 y C_F1 al IoT.")
+    logger.info("[REG Dispositivo] Enviando desafíos C_F0 y C_F1 al dispositivo IoT.")
     return {"C_F0": C_F0, "C_F1": C_F1}
 
 @app.post("/registration/device")
@@ -111,17 +112,17 @@ async def registerDevice(data: IoTRegistrationRequest):
 
     # Verificar si el dispositivo ya está registrado
     if IoT_Identity in registered_devices:
-        logger.warning(f"El dispositivo con ID {IoT_Identity} ya está registrado.")
+        logger.warning(f"[REG Dispositivo] El dispositivo con ID {IoT_Identity} ya está registrado.")
         raise HTTPException(status_code=400, detail="El dispositivo ya está registrado.")
 
-    logger.info(f"Recibidos datos del dispositivo IoT: IoT_Identity={IoT_Identity}, DPUF_C1={DPUF_C1}, FPUF_Fixed_F0={FPUF_Fixed_F0}, FPUF_Fixed_F1={FPUF_Fixed_F1}")
+    logger.info(f"[REG Dispositivo] Recibidos datos del dispositivo IoT: IoT_Identity={IoT_Identity}, DPUF_C1={DPUF_C1}, FPUF_Fixed_F0={FPUF_Fixed_F0}, FPUF_Fixed_F1={FPUF_Fixed_F1}")
 
     # Cálculo de IoT_T_j
     IoT_T_j = K ^ FPUF_Fixed_F0 ^ FPUF_Fixed_F1
 
     # Generar variables CA_K específicas para este dispositivo
-    CA_K_before_previous = int.from_bytes(os.urandom(8), 'little') %P256.q
-    CA_K_previous = int.from_bytes(os.urandom(8), 'little') %P256.q
+    CA_K_before_previous = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000 
+    CA_K_previous = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000 
     CA_K_current = DPUF_C1  # Actualización con DPUF_C1 recibido
 
     # Registrar el dispositivo
@@ -133,8 +134,7 @@ async def registerDevice(data: IoTRegistrationRequest):
         "CA_K_current": CA_K_current,
     }
 
-    logger.info(f"Dispositivo IoT con ID {IoT_Identity} registrado exitosamente.")
-    logger.info(f"Claves asociadas: {device_keys[IoT_Identity]}")
+    logger.info(f"[REG Dispositivo] Dispositivo IoT con ID {IoT_Identity} registrado exitosamente. Claves asociadas: {device_keys[IoT_Identity]}")
     
     # Respuesta al dispositivo IoT
     return IoTRegistrationResponse(CA_K_previous=CA_K_previous, IoT_T_j=IoT_T_j)
@@ -177,10 +177,9 @@ async def registerGateway(data: GatewayRegistrationRequest):
     Gateway_Identity = data.Gateway_Identity
 
     # Generar parámetros específicos para el gateway
-    CA_MK_G_CA = int.from_bytes(os.urandom(8), 'little')
-    CA_Sync_K_G_CA_previous = int.from_bytes(os.urandom(8), 'little')
-    CA_r_1_previous = int.from_bytes(os.urandom(8), 'little')
-    logger.info(f"CA_MK_G_CA={CA_MK_G_CA}, CA_Sync_K_G_CA_previous={CA_Sync_K_G_CA_previous}; CA_r_1_previous={CA_r_1_previous}")
+    CA_MK_G_CA = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000  
+    CA_Sync_K_G_CA_previous = int.from_bytes(os.urandom(1024), 'big')% 90000 + 10000  
+    CA_r_1_previous = int.from_bytes(os.urandom(1024), 'big')% 90000 + 10000  
     CA_Sync_K_G_CA = Hash(CA_Sync_K_G_CA_previous, CA_r_1_previous)
     
     # Registrar el gateway
@@ -193,8 +192,7 @@ async def registerGateway(data: GatewayRegistrationRequest):
         "CA_Sync_K_G_CA": CA_Sync_K_G_CA
     }
 
-    logger.info(f"Gateway con ID {Gateway_Identity} registrado exitosamente.")
-    logger.info(f"Claves asociadas: {gateway_keys[Gateway_Identity]}")
+    logger.info(f"[REG Gateway] Gateway con ID {Gateway_Identity} registrado exitosamente. Claves asociadas: {gateway_keys[Gateway_Identity]}")
 
     # Retornar los parámetros al gateway
     return {"CA_Identity": CA_Identity, 
@@ -215,11 +213,9 @@ def handleMutualAuthentication(gateway_socket):
         data = gateway_socket.recv(4096)
         received_message = json.loads(data.decode('utf-8'))
         decoded_message = decode_message(received_message)
-        logger.info(f"PASO 1:decoded_message:{decoded_message}.")
+        logger.info(f"[AUTH] Recepción de datos del Gateway: {decoded_message}.")
         
-        # Realizar cálculos y preparar respuesta
         ReturnData = RetrieveR_2_ID(decoded_message)
-        logger.info(f"PASO 1: ReturnData={ReturnData}.")
         message = ReturnData[:6]
         HashResult = ReturnData[6]
         G_r_1_Decrypted = ReturnData[7]
@@ -236,23 +232,22 @@ def handleMutualAuthentication(gateway_socket):
         }
         encoded_message = encode_message(response_payload)
         gateway_socket.sendall(json.dumps(encoded_message).encode('utf-8'))
-        logger.info("PASO 2: Enviado mensaje de sincronización al Gateway.")
+        logger.info("[AUTH] Enviado mensaje de sincronización al Gateway.")
 
         # Paso 3: Recibir Epison_3_1 del Gateway
         data = gateway_socket.recv(4096)
         received_message = json.loads(data.decode('utf-8'))
         decoded_message = decode_message(received_message)
-        if "Epison_3_1" not in data:
+        if "Epison_3_1" not in decoded_message:
             raise KeyError("Falta Epison_3_1 en la solicitud del Gateway.")
         Epison_3_1 = decoded_message["Epison_3_1"]
-        logger.info("PASO 3: Recibido Epison_3_1 del Gateway.") 
+        logger.info("[AUTH] Recibido Epison_3_1 del Gateway.") 
         
         # Actualizar las claves de sincronización
-        CA_K_before_previous = device_keys[IoT_Identity]["CA_K_before_previous"]
         CA_K_previous = device_keys[IoT_Identity]["CA_K_previous"]
         CA_K_current = device_keys[IoT_Identity]["CA_K_current"]
         CA_Sync_K_G_CA = gateway_keys[Gateway_Identity]["CA_Sync_K_G_CA"]
-
+        
         M_3 = updatingSynchronizationKeys(
             Gateway_Identity,
             Epison_3_1,
@@ -263,13 +258,12 @@ def handleMutualAuthentication(gateway_socket):
             CA_K_current,
             CA_Sync_K_G_CA
         )
-        logger.info("Claves de sincronización actualizadas correctamente.")
+        logger.info("[AUTH] Claves de sincronización actualizadas correctamente.")
 
-        # Paso 4: Enviar M_4 al Gateway
+        # Paso 4: Enviar M_3 al Gateway
         encoded_message = encode_message({"M_3": M_3})
-        logger.info("PASO 4: M_3={M_3}")
         gateway_socket.sendall(json.dumps(encoded_message).encode('utf-8'))
-        logger.info("PASO 4: Mensaje M_3 enviado al Gateway.")
+        logger.info("[AUTH] Mensaje M_3 enviado al Gateway.")
         
     except KeyError as e:
         logger.error(f"Clave faltante en los datos recibidos: {e}")
@@ -289,31 +283,30 @@ def RetrieveR_2_ID(data):
     Epison_1_5= data["Epison_1_5"]
     iv= data["iv"]
     
-    logger.info(f"RetrieveR_2_ID gateway_keys={gateway_keys}; Gateway_Identity={Gateway_Identity}.")
     # Datos del registro del gateway
     CA_MK_G_CA = gateway_keys[Gateway_Identity]["CA_MK_G_CA"]
     CA_Sync_K_G_CA_previous = gateway_keys[Gateway_Identity]["CA_Sync_K_G_CA_previous"]
     CA_Sync_K_G_CA = gateway_keys[Gateway_Identity]["CA_Sync_K_G_CA"]
-    
+
     h1 = hashlib.new('sha256')
-    h1.update(CA_Sync_K_G_CA.to_bytes(32, 'little'))
+    h1.update(CA_Sync_K_G_CA.to_bytes(32, 'big'))
     HashResult=bytes(h1.hexdigest(),'utf-8')
 
     DEC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    IoT_ID_Decrypted=int.from_bytes(DEC.decrypt(Epison_1_1), 'little')
+    IoT_ID_Decrypted=int.from_bytes(DEC.decrypt(Epison_1_1), 'big')
 
     DEC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    IoT_r_2_Decrypted=int.from_bytes(DEC.decrypt(Epison_1_2),'little')
+    IoT_r_2_Decrypted=int.from_bytes(DEC.decrypt(Epison_1_2),'big')
 
     DEC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    IoT_r_3_Decrypted=int.from_bytes(DEC.decrypt(Epison_1_3),'little')
-        
+    IoT_r_3_Decrypted=int.from_bytes(DEC.decrypt(Epison_1_3),'big')
+       
     DEC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    G_r_1_Decrypted=int.from_bytes(DEC.decrypt(Epison_1_4),'little')
+    G_r_1_Decrypted=int.from_bytes(DEC.decrypt(Epison_1_4),'big')
 
     DEC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    IoT_K_i_Decrypted=int.from_bytes(DEC.decrypt(Epison_1_5),'little')
-   
+    IoT_K_i_Decrypted=int.from_bytes(DEC.decrypt(Epison_1_5),'big')
+    
     assert G_sigma_1 ==Hash(CA_MK_G_CA,Gateway_Identity,G_nonce), "The authentication of the Gateway by the CA has failed"
 
     if G_sigma_2==Hash(CA_Sync_K_G_CA_previous,Gateway_Identity,G_nonce):
@@ -329,32 +322,35 @@ def RetrieveR_2_ID(data):
     CA_K_before_previous = device_keys[IoT_Identity]["CA_K_before_previous"]
     CA_K_previous = device_keys[IoT_Identity]["CA_K_previous"]
     CA_K_current = device_keys[IoT_Identity]["CA_K_current"]
-    CA_r_1_previous = device_keys[IoT_Identity]["CA_r_1_previous"]
+    
+    # Datos del registro del Gateway
+    CA_r_1_previous = gateway_keys[Gateway_Identity]["CA_r_1_previous"]
+    
     ENC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    Epison_2_1=ENC.encrypt(CA_K_before_previous.to_bytes(4,'little'))
+    Epison_2_1=ENC.encrypt(CA_K_before_previous.to_bytes(32,'big'))
 
     ENC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    Epison_2_2=ENC.encrypt(CA_K_previous.to_bytes(4,'little'))
+    Epison_2_2=ENC.encrypt(CA_K_previous.to_bytes(32,'big'))
 
     ENC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    Epison_2_3=ENC.encrypt(CA_K_current.to_bytes(4,'little'))
+    Epison_2_3=ENC.encrypt(CA_K_current.to_bytes(32,'big'))
 
     ENC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    Epison_2_4=ENC.encrypt(CA_r_1_previous.to_bytes(4,'little'))
+    Epison_2_4=ENC.encrypt(CA_r_1_previous.to_bytes(32,'big'))
 
     return CA_sigma_3, Epison_2_1, Epison_2_2, Epison_2_3, Epison_2_4, D_sync_CA_G, HashResult, G_r_1_Decrypted, iv
 
 def updatingSynchronizationKeys(Gateway_Identity,Epison_3_1,HashResult,iv,G_r_1_Decrypted,CA_K_previous,CA_K_current,CA_Sync_K_G_CA):
         
     DEC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
-    CA_IoT_K_i_next=int.from_bytes(DEC.decrypt(Epison_3_1),'little')
+    CA_IoT_K_i_next=int.from_bytes(DEC.decrypt(Epison_3_1),'big')
 
     ##### Update the IoT synchronization keys ##############
     
     device_keys[IoT_Identity]["CA_K_before_previous"]=CA_K_previous
     device_keys[IoT_Identity]["CA_K_previous"]=CA_K_current
     device_keys[IoT_Identity]["CA_K_current"]=CA_IoT_K_i_next
-    device_keys[IoT_Identity]["CA_r_1_previous"]=G_r_1_Decrypted
+    gateway_keys[Gateway_Identity]["CA_r_1_previous"]=G_r_1_Decrypted
     
     CA_K_before_previous=device_keys[IoT_Identity]["CA_K_before_previous"]
     CA_K_previous= device_keys[IoT_Identity]["CA_K_previous"]
@@ -364,7 +360,7 @@ def updatingSynchronizationKeys(Gateway_Identity,Epison_3_1,HashResult,iv,G_r_1_
     CA_Sync_K_G_CA_previous=CA_Sync_K_G_CA
     CA_Sync_K_G_CA=Hash(CA_Sync_K_G_CA,G_r_1_Decrypted)
     M_3=Hash(CA_K_before_previous,CA_K_previous,CA_K_current,CA_Sync_K_G_CA)
-    registered_gateways[Gateway_Identity]["CA_Sync_K_G_CA_previous"] = CA_Sync_K_G_CA_previous
+    gateway_keys[Gateway_Identity]["CA_Sync_K_G_CA_previous"] = CA_Sync_K_G_CA_previous
     return M_3
 
 #######################################################
@@ -376,7 +372,6 @@ def encode_message(message_dict):
     Convierte un mensaje en un formato JSON serializable.
     Los objetos de tipo bytes se codifican en base64.
     """
-    logger.info(f"Encode message={message_dict}")
     encoded_message = {}
     
     # Recorre y codifica cada elemento del mensaje
@@ -390,17 +385,22 @@ def encode_message(message_dict):
 
 def decode_message(encoded_message_dict):
     """
-    Convierte un mensaje codificado en base64 de vuelta a su forma original.
+    Decodifica un mensaje que contiene valores codificados en Base64.
     """
     decoded_message = {}
-    # Recorre y decodifica cada elemento del mensaje
-    for key in encoded_message_dict:
-        value = encoded_message_dict[key]
-        try:
-            decoded_message [key] = base64.b64decode(value) if isinstance(value, str) else value
-        except ValueError:
-            decoded_message [key] = value  # Si no es base64, se retorna como está
+    for key, value in encoded_message_dict.items():
+        if isinstance(value, str):  # Solo intentar decodificar cadenas
+            try:
+                # Decodificar solo si es válido Base64
+                decoded_message[key] = base64.b64decode(value)
+            except (ValueError, binascii.Error):
+                # Si no es Base64, mantener el valor original
+                decoded_message[key] = value
+        else:
+            # No es cadena, mantener el valor original
+            decoded_message[key] = value
     return decoded_message
+
 
 if __name__ == "__main__":
     # Inicia el servidor de métricas Prometheus

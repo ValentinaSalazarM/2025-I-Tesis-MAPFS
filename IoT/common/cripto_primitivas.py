@@ -14,28 +14,27 @@ def Hash(*dataListByte):
     h = hashlib.new('sha256')
     Mydata=b""
     for data in dataListByte:
-        #print("Data: ",data)
-        Mydata = Mydata + data.to_bytes(32, 'little')
+        Mydata = Mydata + data.to_bytes(32, 'big')
     h.update(Mydata)
     HashResult=h.hexdigest()
     HashInt=int(HashResult,16)
-    Hash_value=(HashInt%P256.q) % 90000 + 10000 
+    Hash_value=HashInt% 90000 + 10000  
     return Hash_value
 
 def FPUF(Challenge):
     h = hashlib.new('sha256')
-    h.update(Challenge.to_bytes(32, 'little')) 
+    h.update(Challenge.to_bytes(32, 'big'))
     HashResult=h.hexdigest()
-    HashInt=int(HashResult,16) % 90000 + 10000 
-    Response=HashInt%P256.q
+    HashInt=int(HashResult,16)
+    Response=HashInt% 90000 + 10000  
     time.sleep(2.2/1000)
     return Response
 
 def DPUF(Challenge, state):
     h = hashlib.new('sha256')
-    h.update(Challenge.to_bytes(32, 'little')+state.to_bytes(32, 'little'))
+    h.update(Challenge.to_bytes(32, 'big')+state.to_bytes(32, 'big'))
     HashResult=h.hexdigest()
-    HashInt=int(HashResult,16) % 90000 + 10000 
-    Response=HashInt%P256.q
+    HashInt=int(HashResult,16)
+    Response=HashInt% 90000 + 10000  
     time.sleep(3.3/1000)
     return Response

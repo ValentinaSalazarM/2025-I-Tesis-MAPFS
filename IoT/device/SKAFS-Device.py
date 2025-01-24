@@ -1,3 +1,5 @@
+import base64
+import binascii
 import requests
 import logging
 import random
@@ -43,13 +45,13 @@ def registrationIoT():
     global registration_parameters, C_F0, C_F1
     
     # Generación de DPUF challenge y estado
-    C_1 = int.from_bytes(os.urandom(8), 'little') %P256.q
-    state = int.from_bytes(os.urandom(8), 'little') %P256.q
+    C_1 = int.from_bytes(os.urandom(1024), 'big')  % 90000 + 10000  
+    state = int.from_bytes(os.urandom(1024), 'big')  % 90000 + 10000  
 
     # Generación de la identidad del IoT
-    IoT_Identity = int.from_bytes(os.urandom(8), 'little') %P256.q
+    IoT_Identity = int.from_bytes(os.urandom(1024), 'big')  % 90000 + 10000  
 
-    logger.info(f"IoT_Identity: {IoT_Identity}")
+    logger.info(f"[REG] IoT_Identity: {IoT_Identity}")
     
     # Paso 1: Recepción de desafíos desde el CA
     try:
@@ -58,9 +60,9 @@ def registrationIoT():
         challenges = response.json()
         C_F0 = challenges['C_F0']
         C_F1 = challenges['C_F1']
-        logger.info("Desafíos recibidos del CA.")
+        logger.info("[REG] Desafíos recibidos del CA.")
     except requests.RequestException as e:
-        logger.error(f"Error al recibir desafíos del CA: {e}")
+        logger.error(f"[REG] Error al recibir desafíos del CA: {e}")
         return
     
     # Cálculo de las funciones FPUF y DPUF
@@ -81,9 +83,9 @@ def registrationIoT():
         response_data = response.json()
         CA_K_previous = response_data["CA_K_previous"]
         T_j = response_data["IoT_T_j"]
-        logger.info("Datos enviados y respuesta recibida del CA.")
+        logger.info("[REG] Datos enviados y respuesta recibida del CA.")
     except requests.RequestException as e:
-        logger.error(f"Error al enviar datos al CA: {e}")
+        logger.error(f"[REG] Error al enviar datos al CA: {e}")
         return
     
     # Inicialización de los parámetros en el IoT device
@@ -97,7 +99,7 @@ def registrationIoT():
         "K_previous": K_previous,
         "T_j": T_j
     }
-    logger.info(f"Registro completado exitosamente con los siguientes parámetros: {registration_parameters}")
+    logger.info(f"[REG] Registro completado exitosamente con los siguientes parámetros: {registration_parameters}")
 
 #######################################################
 #                 AUTENTICACIÓN MUTUA                 #
@@ -117,45 +119,39 @@ def mutualAuthentication():
         # Paso 1: Enviar mensaje inicial ("hello") al gateway
         message = {"step": "hello", "message": "hello"}
         response = send_and_receive_persistent_socket(message)
-        logger.info("Mensaje 'hello' enviado al Gateway.")
+        logger.info("[AUTH] Mensaje 'hello' enviado al Gateway.")
         
         # Paso 2: Recibir el token de autenticación del gateway
         if not all(key in response for key in ["G_r_1"]):
             raise KeyError("Faltan claves en la respuesta del Gateway.")
         G_r_1 = response["G_r_1"]
-        logger.info(f"Token de autenticación recibido: G_r_1={G_r_1}.")
+        logger.info(f"[AUTH] Token de autenticación recibido: G_r_1={G_r_1}.")
 
         # Paso 3: Calcular claves y parámetros cifrados al IoT gateway
         message, r_3, K_i = IoTobfuscationForR_2_ID(G_r_1)
         
+        logger.info(f"message={message}.")
         ## message = (A_M_1, ID_obfusacted, r_2_obfuscated, K_i_obfuscated, r_3_obfuscated)
         payload = {"step": "step3", "M_1": message[0], "ID*": message[1],
                    "r_2*": message[2], "K_i*": message[3], "r_3*": message[4]}
         response = send_and_receive_persistent_socket(payload)
-        logger.info("Mensaje cifrado enviado al Gateway.")
+        logger.info("[AUTH] Mensaje cifrado enviado al Gateway.")
 
-        # Paso 4: Recibir claves y sincronización G_M_2, Sync_IoT_G del gateway 
-        data = response.json()
-        
-        ## message = K_i_next_obfuscated
-        if not all(key in response for key in ["K_i_next_obfuscated", "K_s", "state", "C_1"]):
-            raise KeyError("Faltan claves en la respuesta del Gateway.")
+        # Paso 4: Recibir claves y sincronización G_M_2, Sync_IoT_G del gateway         
         message, IoT_K_s, state, IoT_C_1 = computeNextSessionKey(
-            response, G_r_1, r_3, K_i, registration_parameters["C_1"], registration_parameters["state"]
+            response["G_M_2"], G_r_1, r_3, K_i, registration_parameters["C_1"], registration_parameters["state"]
         )
 
         # Paso 5: Enviar claves obfuscadas para la siguiente sesión
-        
-        ## K_i_next_obfuscated
         payload = {"step": "step5", "K_i_next_obfuscated": message}
         response = send_and_receive_persistent_socket(payload)
-        logger.info("Claves obfuscadas enviadas al Gateway.")
+        logger.info("[AUTH] Claves obfuscadas enviadas al Gateway.")
         
         # Paso 6: Recibir mensaje M_4 del gateway y actualizar parámetros
-        if not all(key in response for key in ["IoT_K_previous", "IoT_C_1", "state"]):
-            raise KeyError("Faltan claves en la respuesta del Gateway.")
+        if not all(key in response for key in ["M_4"]):
+            raise KeyError("[AUTH] Faltan claves en la respuesta del Gateway.")
         IoT_K_previous, IoT_C_1, state = updatingChallengeDPUFconfiguration(
-            response, IoT_K_s, G_r_1, r_3, registration_parameters["K_previous"], K_i, IoT_C_1, state
+            response["M_4"], IoT_K_s, G_r_1, r_3, registration_parameters["K_previous"], K_i, IoT_C_1, state
         )
 
         # Paso 7: Actualizar los parámetros locales
@@ -164,19 +160,20 @@ def mutualAuthentication():
             "state": state,
             "C_1": IoT_C_1,
         })
-        logger.info("Parámetros del dispositivo IoT actualizados correctamente.")
+        logger.info("[AUTH] Parámetros del dispositivo IoT actualizados correctamente.")
+        logger.info("[AUTH] Autenticación mutua culminada.")
     except KeyError as e:
-        logger.error(f"Error de datos faltantes en la respuesta: {e}")
+        logger.error(f"[AUTH] Error de datos faltantes en la respuesta: {e}")
     except socket.error as e:
-        logger.error(f"Error en la comunicación por socket: {e}")
+        logger.error(f"[AUTH] Error en la comunicación por socket: {e}")
     except Exception as e:
-        logger.error(f"Error inesperado: {e}")
+        logger.error(f"[AUTH] Error inesperado: {e}")
     finally:
         close_socket() 
 
 def IoTobfuscationForR_2_ID(G_r_1):
-    r_2 = int.from_bytes(os.urandom(64), 'little') 
-    r_3 = int.from_bytes(os.urandom(64), 'little') 
+    r_2 = int.from_bytes(os.urandom(1024), 'big')  % 90000 + 10000  
+    r_3 = int.from_bytes(os.urandom(1024), 'big')  % 90000 + 10000  
 
     IoT_Identity = registration_parameters["IoT_Identity"]
     C_1 = registration_parameters["C_1"]
@@ -198,8 +195,7 @@ def computeNextSessionKey(data, G_r_1, r_3, K_i, C_1, state):
     #G_M_2, Sync_G
     G_M_2 = data[0]
     Sync_G = data[1]
-
-    assert G_M_2==Hash(K_i,Sync_G,G_r_1,r_3), "The authentication of the Gateway on the IoT device has failed"
+    assert G_M_2==Hash(K_i,Sync_G,G_r_1,r_3), "[AUTH] La autenticación del Gateway en el dispositivo IoT falló."
     if Sync_G==-1:
         C_1=Hash(C_1)
         state=Hash(state)
@@ -207,11 +203,11 @@ def computeNextSessionKey(data, G_r_1, r_3, K_i, C_1, state):
     K_i_next=DPUF(Hash(C_1),Hash(state))
     K_i_next_obfuscated=K_i_next^K_i
     K_s=Hash(G_r_1,r_3,K_i)
-    logger.info("The IoT session Key: {K_s}")
+    logger.info(f"[AUTH] La llave de sesión en el dispositivo IoT es: {K_s}")
     return K_i_next_obfuscated, K_s, state, C_1
 
 def updatingChallengeDPUFconfiguration(M_4,K_s,G_r_1,r_3,K_previous,K_i,C_1,state):
-    assert M_4 == Hash(K_s,G_r_1,r_3), "The synchronization keys between the IoT device and the gateway have not been updated on the IoT device"
+    assert M_4 == Hash(K_s,G_r_1,r_3), "[AUTH] Las llaves de sincronización entre el Gateway y el dispositivo IoT no se han actualizado en este último."
     C_1 = Hash(C_1)
     K_previous=K_i
     state=Hash(state)  
@@ -249,7 +245,7 @@ def close_socket():
         finally:
             gateway_socket = None
 
-def send_and_receive_persistent_socket(message):
+def send_and_receive_persistent_socket(message_dict):
     """
     Enviar un mensaje al Gateway utilizando un socket persistente y recibir la respuesta.
     """
@@ -257,27 +253,39 @@ def send_and_receive_persistent_socket(message):
     try:
         if gateway_socket is None:
             initialize_socket()
-        gateway_socket.sendall(json.dumps(message).encode('utf-8'))  # Enviar mensaje
+        encoded_message = {}
+        for key in message_dict:
+            value = message_dict[key]
+            if isinstance(value, bytes):
+                encoded_message[key] = base64.b64encode(value).decode('utf-8')  # Convertir bytes a base64 y luego a str
+            else:
+                encoded_message[key] = value
+        #logger.info(f"send_and_receive_persistent_socket- encoded_message={encoded_message}")
+        gateway_socket.sendall(json.dumps(encoded_message).encode('utf-8'))  # Enviar mensaje
+        
         response = gateway_socket.recv(4096)                        # Recibir respuesta
-        return json.loads(response.decode('utf-8'))                 # Retornar respuesta decodificada
+        received_message_dict = json.loads(response.decode('utf-8')) 
+        decoded_message = {}
+        for key, value in received_message_dict.items():
+            if isinstance(value, str):  # Solo intentar decodificar cadenas
+                try:
+                    # Decodificar solo si es válido Base64
+                    decoded_message[key] = base64.b64decode(value)
+                except (ValueError, binascii.Error):
+                    # Si no es Base64, mantener el valor original
+                    decoded_message[key] = value
+            else:
+                # No es cadena, mantener el valor original
+                decoded_message[key] = value
+        #logger.info(f"send_and_receive_persistent_socket- decoded_response={decoded_message}")
+        return decoded_message        
     except socket.error as e:
         logger.error(f"Error en la comunicación por socket persistente: {e}")
         gateway_socket = None  # Marcar el socket como no válido
         raise e
-
-def sendData():
-    while True:
-        sensor_data = {"DEV-temperature": random.uniform(20.0, 30.0), "DEV-humidity": random.uniform(50, 70)}
-        try:
-            response = requests.post(CA_URL, json=sensor_data)
-            logger.info(f"[DEVICE] Data sent: {sensor_data}, Response: {response.status_code}")
-        except Exception as e:
-            logger.error(f"Error sending data: {e}")
-        time.sleep(25)
         
 if __name__ == '__main__':
-    #logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8012.")
-    #start_http_server(8012, addr="0.0.0.0")
+    logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8012.")
+    start_http_server(8012)
     registrationIoT()
     mutualAuthentication()
-    #sendData()

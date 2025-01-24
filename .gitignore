@@ -1,4 +1,4 @@
-./Monitoreo/grafana-data/
-./Monitoreo/prometheus-data/
-./Monitoreo/loki-data/
-./Monitoreo/logs/
+Monitoreo/grafana-data/
+Monitoreo/prometheus-data/
+Monitoreo/loki-data/
+Monitoreo/logs/

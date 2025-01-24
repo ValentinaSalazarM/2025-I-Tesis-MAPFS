@@ -69,7 +69,7 @@ services:
     container_name: cadvisor
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - 8080:8080
     volumes:
       # Monta el sistema de archivos raíz del host
       - /:/rootfs:ro
@@ -99,9 +99,9 @@ services:
       options:
         loki-url: "http://localhost:3100/loki/api/v1/push"  
     ports:
-      - "8001:8001" #API
-      - "8011:8011" #Prometheus
-      - "5001:5001" #Socket
+      - 8001:8001 #API
+      - 8011:8011 #Prometheus
+      - 5001:5001 #Socket
     command: ["python", "-m", "cloud.SKAFS-CA"]
 
   skafs-gateway:
@@ -120,8 +120,8 @@ services:
       options:
         loki-url: "http://localhost:3100/loki/api/v1/push"  
     ports:
-      - "8010:8010" #Prometheus
-      - "5000:5000" #Socket
+      - 8010:8010 #Prometheus
+      - 5000:5000 #Socket
     command: ["python", "-m", "gateway.SKAFS-Gateway"]
   
   skafs-device:
@@ -140,7 +140,7 @@ services:
     volumes:
       - ./Monitoreo/logs/device:/logs
     ports:
-      - "8012:8012" #Prometheus
+      - 8012:8012 #Prometheus
     command: ["python", "-m", "device.SKAFS-Device"]
 
 networks:
