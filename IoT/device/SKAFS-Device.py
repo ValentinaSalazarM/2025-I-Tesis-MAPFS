@@ -16,19 +16,16 @@ from prometheus_client import start_http_server, Counter, Histogram
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler("/logs/SKAFS-device.log"),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.FileHandler("/logs/SKAFS-device.log"), logging.StreamHandler()],
 )
 logger = logging.getLogger("Device")
 
 # Configuración del socket
-GATEWAY_HOST = 'skafs-gateway'  # Dirección IP del Gateway
-GATEWAY_PORT = 5000         # Puerto del Gateway
+GATEWAY_HOST = "skafs-gateway"  # Dirección IP del Gateway
+GATEWAY_PORT = 5000  # Puerto del Gateway
 
-CA_HOST = "skafs-cloud"      # Dirección de la CA
-CA_PORT = 5001             # Puerto de la CA
+CA_HOST = "skafs-cloud"  # Dirección de la CA
+CA_PORT = 5001  # Puerto de la CA
 
 gateway_socket = None
 
@@ -39,10 +36,14 @@ C_F1 = None
 # Parámetros de registro
 registration_parameters = {}
 
+# Llaves de sesión
+K_s_bytes = None
+
+
 #######################################################
 #              REGISTRO DISPOSITIVO IOT               #
-#######################################################         
-def registrationIoT():
+#######################################################
+def IoT_registration():
     """
     Registro del dispositivo IoT utilizando comunicación por sockets.
     """
@@ -55,16 +56,16 @@ def registrationIoT():
             logger.info(f"[REG] Conectado al CA en {CA_HOST}:{CA_PORT}")
 
             # Generación de DPUF challenge y estado
-            C_1 = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000
-            state = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000
+            C_1 = int.from_bytes(os.urandom(1024), "big") % 90000 + 10000
+            state = int.from_bytes(os.urandom(1024), "big") % 90000 + 10000
 
             # Generación de la identidad del IoT
-            IoT_Identity = int.from_bytes(os.urandom(1024), 'big') % 90000 + 10000
+            IoT_Identity = int.from_bytes(os.urandom(1024), "big") % 90000 + 10000
             logger.info(f"[REG] IoT_Identity generado: {IoT_Identity}")
 
             # Paso 1: Solicitar desafíos al CA
             initial_request = {"operation": "register_device"}
-            sock.sendall(json.dumps(initial_request).encode('utf-8'))
+            sock.sendall(json.dumps(initial_request).encode("utf-8"))
             logger.info("[REG] Enviada solicitud de registro al CA.")
 
             # Recibir desafíos C_F0 y C_F1
@@ -72,7 +73,7 @@ def registrationIoT():
             if not data:
                 logger.error("[REG] No se recibieron desafíos del CA.")
                 return
-            challenges = json.loads(data.decode('utf-8'))
+            challenges = json.loads(data.decode("utf-8"))
             C_F0 = challenges.get("C_F0")
             C_F1 = challenges.get("C_F1")
             if C_F0 is None or C_F1 is None:
@@ -92,7 +93,7 @@ def registrationIoT():
                 "FPUF_Fixed_F0": FPUF_Fixed_F0,
                 "FPUF_Fixed_F1": FPUF_Fixed_F1,
             }
-            sock.sendall(json.dumps(payload).encode('utf-8'))
+            sock.sendall(json.dumps(payload).encode("utf-8"))
             logger.info("[REG] Datos enviados al CA.")
 
             # Paso 3: Recibir respuesta del CA
@@ -100,7 +101,7 @@ def registrationIoT():
             if not data:
                 logger.error("[REG] No se recibió respuesta del CA.")
                 return
-            response = json.loads(data.decode('utf-8'))
+            response = json.loads(data.decode("utf-8"))
             CA_K_previous = response.get("CA_K_previous")
             T_j = response.get("IoT_T_j")
             if CA_K_previous is None or T_j is None:
@@ -116,9 +117,11 @@ def registrationIoT():
                 "C_1": C_1,
                 "IoT_Identity": IoT_Identity,
                 "K_previous": K_previous,
-                "T_j": T_j
+                "T_j": T_j,
             }
-            logger.info(f"[REG] Registro completado exitosamente con los siguientes parámetros: {registration_parameters}")
+            logger.info(
+                f"[REG] Registro completado exitosamente con los siguientes parámetros: {registration_parameters}"
+            )
 
     except KeyError as e:
         logger.error(f"[REG] Clave faltante: {e}")
@@ -127,26 +130,31 @@ def registrationIoT():
     except Exception as e:
         logger.error(f"[REG] Error inesperado durante el registro: {e}")
 
+
 #######################################################
 #                 AUTENTICACIÓN MUTUA                 #
 #######################################################
-def mutualAuthentication():
+def mutual_authentication():
     """
     Protocolo de autenticación mutua para el dispositivo IoT.
     Este proceso asegura la autenticidad y sincronización de claves entre el dispositivo IoT y el gateway.
     """
-    
+
     global registration_parameters
 
     try:
         # Inicializar el socket persistente
         initialize_socket()
-        
+
         # Paso 1: Enviar mensaje inicial ("hello") al gateway
-        message = {"step": "hello", "message": "hello"}
+        message = {
+            "operation": "mutual_authentication",
+            "step": "hello",
+            "message": "hello",
+        }
         response = send_and_receive_persistent_socket(message)
         logger.info("[AUTH] Mensaje 'hello' enviado al Gateway.")
-        
+
         # Paso 2: Recibir el token de autenticación del gateway
         if not all(key in response for key in ["G_r_1"]):
             raise KeyError("Faltan claves en la respuesta del Gateway.")
@@ -154,38 +162,58 @@ def mutualAuthentication():
         logger.info(f"[AUTH] Token de autenticación recibido: G_r_1={G_r_1}.")
 
         # Paso 3: Calcular claves y parámetros cifrados al IoT gateway
-        message, r_3, K_i = IoTobfuscationForR_2_ID(G_r_1)
-        
+        message, r_3, K_i = IoT_obfuscation_for_R_2_ID(G_r_1)
+
         logger.info(f"message={message}.")
-        ## message = (A_M_1, ID_obfusacted, r_2_obfuscated, K_i_obfuscated, r_3_obfuscated)
-        payload = {"step": "step3", "M_1": message[0], "ID*": message[1],
-                   "r_2*": message[2], "K_i*": message[3], "r_3*": message[4]}
+        ## message = (A_M_1, ID_obfuscated, r_2_obfuscated, K_i_obfuscated, r_3_obfuscated)
+        payload = {
+            "step": "step3",
+            "M_1": message[0],
+            "ID*": message[1],
+            "r_2*": message[2],
+            "K_i*": message[3],
+            "r_3*": message[4],
+        }
         response = send_and_receive_persistent_socket(payload)
         logger.info("[AUTH] Mensaje cifrado enviado al Gateway.")
 
-        # Paso 4: Recibir claves y sincronización G_M_2, Sync_IoT_G del gateway         
-        message, IoT_K_s, state, IoT_C_1 = computeNextSessionKey(
-            response["G_M_2"], G_r_1, r_3, K_i, registration_parameters["C_1"], registration_parameters["state"]
+        # Paso 4: Recibir claves y sincronización G_M_2, Sync_IoT_G del gateway
+        message, IoT_K_s, state, IoT_C_1 = compute_next_session_key(
+            response["G_M_2"],
+            G_r_1,
+            r_3,
+            K_i,
+            registration_parameters["C_1"],
+            registration_parameters["state"],
         )
 
         # Paso 5: Enviar claves obfuscadas para la siguiente sesión
         payload = {"step": "step5", "K_i_next_obfuscated": message}
         response = send_and_receive_persistent_socket(payload)
         logger.info("[AUTH] Claves obfuscadas enviadas al Gateway.")
-        
+
         # Paso 6: Recibir mensaje M_4 del gateway y actualizar parámetros
         if not all(key in response for key in ["M_4"]):
             raise KeyError("[AUTH] Faltan claves en la respuesta del Gateway.")
-        IoT_K_previous, IoT_C_1, state = updatingChallengeDPUFconfiguration(
-            response["M_4"], IoT_K_s, G_r_1, r_3, registration_parameters["K_previous"], K_i, IoT_C_1, state
+        IoT_K_previous, IoT_C_1, state = updating_challenge_DPUF_configuration(
+            response["M_4"],
+            IoT_K_s,
+            G_r_1,
+            r_3,
+            registration_parameters["K_previous"],
+            K_i,
+            IoT_C_1,
+            state,
         )
 
         # Paso 7: Actualizar los parámetros locales
-        registration_parameters.update({
-            "K_previous": IoT_K_previous,
-            "state": state,
-            "C_1": IoT_C_1,
-        })
+        registration_parameters.update(
+            {
+                "K_previous": IoT_K_previous,
+                "state": state,
+                "C_1": IoT_C_1,
+            }
+        )
         logger.info("[AUTH] Parámetros del dispositivo IoT actualizados correctamente.")
         logger.info("[AUTH] Autenticación mutua culminada.")
     except KeyError as e:
@@ -195,53 +223,133 @@ def mutualAuthentication():
     except Exception as e:
         logger.error(f"[AUTH] Error inesperado: {e}")
     finally:
-        close_socket() 
+        close_socket()
 
-def IoTobfuscationForR_2_ID(G_r_1):
-    r_2 = int.from_bytes(os.urandom(1024), 'big')  % 90000 + 10000  
-    r_3 = int.from_bytes(os.urandom(1024), 'big')  % 90000 + 10000  
+
+def IoT_obfuscation_for_R_2_ID(G_r_1):
+    global ID_obfuscated
+    r_2 = int.from_bytes(os.urandom(1024), "big") % 90000 + 10000
+    r_3 = int.from_bytes(os.urandom(1024), "big") % 90000 + 10000
 
     IoT_Identity = registration_parameters["IoT_Identity"]
     C_1 = registration_parameters["C_1"]
     state = registration_parameters["state"]
     K_previous = registration_parameters["K_previous"]
     T_j = registration_parameters["T_j"]
-    
-    ID_obfusacted=IoT_Identity^Hash(G_r_1,r_2)
-    K_i=DPUF(C_1,state)
-    K_i_obfuscated=K_i^K_previous
-    A_M_1=Hash(K_i,G_r_1,r_3)
-    r_2_obfuscated=FPUF(C_F0)^r_2
-    r_2_obfuscated=r_2_obfuscated^FPUF(C_F1)^T_j
-    r_3_obfuscated=r_3^K_i
 
-    return (A_M_1, ID_obfusacted, r_2_obfuscated, K_i_obfuscated, r_3_obfuscated), r_3, K_i
+    ID_obfuscated = IoT_Identity ^ Hash(G_r_1, r_2)
+    K_i = DPUF(C_1, state)
+    K_i_obfuscated = K_i ^ K_previous
+    A_M_1 = Hash(K_i, G_r_1, r_3)
+    r_2_obfuscated = FPUF(C_F0) ^ r_2
+    r_2_obfuscated = r_2_obfuscated ^ FPUF(C_F1) ^ T_j
+    r_3_obfuscated = r_3 ^ K_i
 
-def computeNextSessionKey(data, G_r_1, r_3, K_i, C_1, state):
-    #G_M_2, Sync_G
+    return (
+        (A_M_1, ID_obfuscated, r_2_obfuscated, K_i_obfuscated, r_3_obfuscated),
+        r_3,
+        K_i,
+    )
+
+
+def compute_next_session_key(data, G_r_1, r_3, K_i, C_1, state):
+    global K_s_bytes
+    # G_M_2, Sync_G
     G_M_2 = data[0]
     Sync_G = data[1]
-    assert G_M_2==Hash(K_i,Sync_G,G_r_1,r_3), "[AUTH] La autenticación del Gateway en el dispositivo IoT falló."
-    if Sync_G==-1:
-        C_1=Hash(C_1)
-        state=Hash(state)
-    K_i=DPUF(C_1,state)
-    K_i_next=DPUF(Hash(C_1),Hash(state))
-    K_i_next_obfuscated=K_i_next^K_i
-    K_s=Hash(G_r_1,r_3,K_i)
-    logger.info(f"[AUTH] La llave de sesión en el dispositivo IoT es: {K_s}")
-    return K_i_next_obfuscated, K_s, state, C_1
+    assert G_M_2 == Hash(
+        K_i, Sync_G, G_r_1, r_3
+    ), "[AUTH] La autenticación del Gateway en el dispositivo IoT falló."
+    if Sync_G == -1:
+        C_1 = Hash(C_1)
+        state = Hash(state)
+    K_i = DPUF(C_1, state)
+    K_i_next = DPUF(Hash(C_1), Hash(state))
+    K_i_next_obfuscated = K_i_next ^ K_i
+    K_s_int = Hash(G_r_1, r_3, K_i)
+    K_s_bytes = K_s_int.to_bytes(AES.block_size, "big")
+    logger.info(f"[AUTH] La llave de sesión en el dispositivo IoT es: {K_s_int}")
+    return K_i_next_obfuscated, K_s_int, state, C_1
 
-def updatingChallengeDPUFconfiguration(M_4,K_s,G_r_1,r_3,K_previous,K_i,C_1,state):
-    assert M_4 == Hash(K_s,G_r_1,r_3), "[AUTH] Las llaves de sincronización entre el Gateway y el dispositivo IoT no se han actualizado en este último."
+
+def updating_challenge_DPUF_configuration(
+    M_4, K_s, G_r_1, r_3, K_previous, K_i, C_1, state
+):
+    assert M_4 == Hash(
+        K_s, G_r_1, r_3
+    ), "[AUTH] Las llaves de sincronización entre el Gateway y el dispositivo IoT no se han actualizado en este último."
     C_1 = Hash(C_1)
-    K_previous=K_i
-    state=Hash(state)  
-    return  K_previous,C_1,state
+    K_previous = K_i
+    state = Hash(state)
+    return K_previous, C_1, state
+
+
+#######################################################
+#                 INTERCAMBIAR MENSAJES               #
+#######################################################
+
+
+def message_authetication():
+    """
+    Envía métricas cifradas al Gateway utilizando AES en modo CBC.
+
+    """
+    try:
+        while True:
+            sensor_data = {
+                "temperature": random.uniform(20.0, 30.0),
+                "humidity": random.uniform(50, 70),
+            }
+
+            # Serializar las métricas a JSON
+            metrics_json = json.dumps(sensor_data).encode("utf-8")
+
+            # Generar un IV aleatorio para CBC
+            iv = Random.new().read(AES.block_size)
+
+            # Crear el cifrador AES en modo CBC
+            cipher = AES.new(K_s_bytes, AES.MODE_CBC, iv)
+
+            # Cifrar las métricas con padding
+            encrypted_metrics = cipher.encrypt(pad(metrics_json, AES.block_size))
+
+            # Construir el mensaje para enviar al Gateway
+            payload = {
+                "operation": "send_metrics",
+                "ID_obfuscated": ID_obfuscated,
+                "iv": base64.b64encode(iv).decode("utf-8"),
+                "encrypted_metrics": base64.b64encode(encrypted_metrics).decode(
+                    "utf-8"
+                ),
+            }
+
+            # Enviar el mensaje al Gateway mediante sockets
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.connect((GATEWAY_HOST, GATEWAY_PORT))
+                sock.sendall(json.dumps(payload).encode("utf-8"))
+                logger.info("[METRICS] Mensaje cifrado enviado al Gateway.")
+
+                # Recibir respuesta del Gateway
+                response = sock.recv(4096)
+                if response:
+                    response_message = json.loads(response.decode("utf-8"))
+                    logger.info(
+                        f"[METRICS] Respuesta recibida del Gateway: {response_message}"
+                    )
+            time.sleep(60)
+    except ValueError as e:
+        logger.error(f"[METRICS] Error de validación: {e}")
+    except socket.error as e:
+        logger.error(f"[METRICS] Error de comunicación por socket: {e}")
+    except Exception as e:
+        logger.error(f"[METRICS] Error inesperado: {e}")
+
 
 #######################################################
 #                      AUXILIARES                     #
 #######################################################
+
+
 def initialize_socket():
     """
     Inicializa un socket persistente para comunicarse con el Gateway.
@@ -256,7 +364,8 @@ def initialize_socket():
             logger.error(f"Error al conectar con el Gateway: {e}")
             gateway_socket = None
             raise e
-        
+
+
 def close_socket():
     """
     Cierra el socket persistente.
@@ -271,6 +380,7 @@ def close_socket():
         finally:
             gateway_socket = None
 
+
 def send_and_receive_persistent_socket(message_dict):
     """
     Enviar un mensaje al Gateway utilizando un socket persistente y recibir la respuesta.
@@ -283,14 +393,18 @@ def send_and_receive_persistent_socket(message_dict):
         for key in message_dict:
             value = message_dict[key]
             if isinstance(value, bytes):
-                encoded_message[key] = base64.b64encode(value).decode('utf-8')  # Convertir bytes a base64 y luego a str
+                encoded_message[key] = base64.b64encode(value).decode(
+                    "utf-8"
+                )  # Convertir bytes a base64 y luego a str
             else:
                 encoded_message[key] = value
-        #logger.info(f"send_and_receive_persistent_socket- encoded_message={encoded_message}")
-        gateway_socket.sendall(json.dumps(encoded_message).encode('utf-8'))  # Enviar mensaje
-        
-        response = gateway_socket.recv(4096)                        # Recibir respuesta
-        received_message_dict = json.loads(response.decode('utf-8')) 
+        # logger.info(f"send_and_receive_persistent_socket- encoded_message={encoded_message}")
+        gateway_socket.sendall(
+            json.dumps(encoded_message).encode("utf-8")
+        )  # Enviar mensaje
+
+        response = gateway_socket.recv(4096)  # Recibir respuesta
+        received_message_dict = json.loads(response.decode("utf-8"))
         decoded_message = {}
         for key, value in received_message_dict.items():
             if isinstance(value, str):  # Solo intentar decodificar cadenas
@@ -303,15 +417,17 @@ def send_and_receive_persistent_socket(message_dict):
             else:
                 # No es cadena, mantener el valor original
                 decoded_message[key] = value
-        #logger.info(f"send_and_receive_persistent_socket- decoded_response={decoded_message}")
-        return decoded_message        
+        # logger.info(f"send_and_receive_persistent_socket- decoded_response={decoded_message}")
+        return decoded_message
     except socket.error as e:
         logger.error(f"Error en la comunicación por socket persistente: {e}")
         gateway_socket = None  # Marcar el socket como no válido
         raise e
-        
-if __name__ == '__main__':
+
+
+if __name__ == "__main__":
     logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8012.")
     start_http_server(8012)
-    registrationIoT()
-    mutualAuthentication()
+    IoT_registration()
+    mutual_authentication()
+    message_authetication()

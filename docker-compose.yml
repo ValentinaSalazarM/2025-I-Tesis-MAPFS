@@ -128,7 +128,6 @@ services:
     build:
       context: ./IoT
       dockerfile: ./device/Dockerfile
-    container_name: skafs-device
     depends_on:
       - skafs-gateway
     networks:
