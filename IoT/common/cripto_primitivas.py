@@ -1,13 +1,14 @@
 import time
 
-from fastecdsa.curve import Curve
-from fastecdsa import keys, curve
-
-from fastecdsa.curve import P256
+from fastecdsa import keys
+from fastecdsa.curve import Curve, P256
 from fastecdsa.point import Point
 from Crypto import Random
 from Crypto.Util.Padding import unpad, pad
 from Crypto.Cipher import AES
+
+from ecdsa import SigningKey
+from ecdsa.util import PRNG
 
 import hashlib
 
@@ -19,7 +20,7 @@ def Hash(*dataListByte):
     h.update(Mydata)
     HashResult = h.hexdigest()
     HashInt = int(HashResult, 16)
-    Hash_value = truncate_to_16_digits(HashInt)
+    Hash_value = HashInt % P256.q
     return Hash_value
 
 

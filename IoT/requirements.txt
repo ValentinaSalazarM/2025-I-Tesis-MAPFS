@@ -2,6 +2,7 @@ fastapi
 pydantic
 uvicorn
 requests
+ecdsa
 fastecdsa
 pycryptodome
 prometheus_client

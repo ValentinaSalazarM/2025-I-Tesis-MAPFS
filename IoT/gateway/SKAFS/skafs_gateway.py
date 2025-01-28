@@ -9,6 +9,7 @@ import os
 
 from common.cripto_primitivas import *
 
+# Métricas
 from prometheus_client import start_http_server, Counter
 
 # Configuración del logger
@@ -31,9 +32,11 @@ CA_Identity = None
 
 # Parámetros de registro
 registration_parameters = {}
+gateway_identity = int.from_bytes(os.urandom(8), "big")
 
 # Llaves de sesión con dispositivos IoT
 session_keys = {}
+
 
 #######################################################
 #               SERVIDOR SOCKET GATEWAY               #
@@ -51,7 +54,8 @@ def start_gateway_socket():
             client_socket, addr = server_socket.accept()
             logger.info(f"Conexión aceptada de {addr}")
             handle_client_connection(client_socket)
-            
+
+
 def handle_client_connection(client_socket):
     """
     Maneja las conexiones entrantes y redirige a la función adecuada.
@@ -64,7 +68,7 @@ def handle_client_connection(client_socket):
             return
 
         # Decodificar el mensaje
-        message = json.loads(data.decode('utf-8'))
+        message = json.loads(data.decode("utf-8"))
         logger.info(f"Mensaje recibido: {message}")
 
         # Verificar el tipo de operación
@@ -88,37 +92,38 @@ def handle_client_connection(client_socket):
         client_socket.close()
         logger.info("Conexión con el cliente cerrada.")
 
+
 #######################################################
 #                   REGISTRO GATEWAY                  #
 #######################################################
 
+
 def gateway_registration():
-    global registration_parameters, CA_Identity
+    global registration_parameters, CA_Identity, gateway_identity
 
     try:
         # Inicializar el socket con el CA
         initialize_socket()
 
         # Paso 1: Generar y enviar ID del gateway
-        Gateway_Identity = int.from_bytes(os.urandom(1024), "big") % 90000 + 10000
-        logger.info(f"[REG] Gateway_Identity: {Gateway_Identity}")
+        logger.info(f"[REG] Gateway_Identity: {gateway_identity}")
 
         # Crear el mensaje a enviar
-        request_payload = {
+        first_payload = {
             "operation": "register_gateway",
-            "Gateway_Identity": Gateway_Identity,
+            "Gateway_Identity": gateway_identity,
         }
-        logger.info("[REG] Enviando Gateway_Identity al CA...")
+        logger.info("[REG] Enviando Gateway_Identity al CA.")
 
         # Enviar el mensaje y esperar respuesta
-        response_payload = send_and_receive_persistent_socket(request_payload)
+        first_response = send_and_receive_persistent_socket(first_payload)
         logger.info("[REG] Respuesta recibida del CA.")
 
         # Paso 2: Procesar respuesta del CA
-        CA_Identity = response_payload["CA_Identity"]
-        CA_MK_G_CA = response_payload["CA_MK_G_CA"]
-        CA_Sync_K_G_CA_previous = response_payload["CA_Sync_K_G_CA_previous"]
-        CA_r_1_previous = response_payload["CA_r_1_previous"]
+        CA_Identity = first_response.get("CA_Identity")
+        CA_MK_G_CA = first_response.get("CA_MK_G_CA")
+        CA_Sync_K_G_CA_previous = first_response.get("CA_Sync_K_G_CA_previous")
+        CA_r_1_previous = first_response.get("CA_r_1_previous")
 
         if None in (CA_Identity, CA_MK_G_CA, CA_Sync_K_G_CA_previous, CA_r_1_previous):
             raise ValueError("Datos faltantes en la respuesta del CA.")
@@ -134,14 +139,15 @@ def gateway_registration():
 
         # Paso 3: Guardar los parámetros en la configuración del Gateway
         registration_parameters = {
-            "Gateway_Identity": Gateway_Identity,
             "G_MK_G_CA": G_MK_G_CA,
             "G_Sync_K_G_CA_previous": G_Sync_K_G_CA_previous,
             "G_r_1_previous": G_r_1_previous,
             "G_Sync_K_G_CA": G_Sync_K_G_CA,
             "Sync_IoT_G": 0,
         }
-        logger.info("[REG] Registro completado exitosamente.")
+        logger.info(
+            f"[REG] Registro completado exitosamente con los siguientes parámetros: {registration_parameters}"
+        )
 
     except socket.error as e:
         logger.error(f"[REG] Error de comunicación con el CA: {e}")
@@ -160,19 +166,16 @@ def gateway_registration():
 
 def handle_mutual_authentication(client_socket, message):
     """
-    Maneja la conexión de un cliente (IoT Device) y ejecuta el protocolo de autenticación mutua.
+    Maneja la conexión de un cliente (IoT Device) y ejecuta el protocolo de autenticación mutua con el CA.
     """
     global registration_parameters
     try:
         # Paso 1: Recibir mensaje "hello" del dispositivo IoT
-        #data = json.loads(client_socket.recv(4096).decode("utf-8"))
         if message.get("step") != "hello":
             raise ValueError("Paso incorrecto recibido del dispositivo.")
-        IoT_HelloMsg = message.get("message", "No message")
-        logger.info(f"[AUTH] Mensaje recibido del IoT Device: {IoT_HelloMsg}")
 
         # Paso 2: Generar r_1 y enviarlo al dispositivo IoT
-        G_r_1 = int.from_bytes(os.urandom(1024), "big") % 90000 + 10000
+        G_r_1 = int.from_bytes(os.urandom(8), "big")
         payload = {"G_r_1": G_r_1}
         client_socket.sendall(json.dumps(payload).encode("utf-8"))
         logger.info(f"[AUTH] r_1 generado y enviado al dispositivo IoT: {G_r_1}")
@@ -180,18 +183,16 @@ def handle_mutual_authentication(client_socket, message):
         # Paso 3: Recibir M_1, ID*, r_2*, K_i*, r_3* del dispositivo IoT
         IoT_M1 = json.loads(client_socket.recv(4096).decode("utf-8"))
         if not all(key in IoT_M1 for key in ["M_1", "ID*", "r_2*", "K_i*", "r_3*"]):
-            raise KeyError("[AUTH] Faltan claves en la respuesta del dispositivo IoT.")
-        # Crear un nuevo diccionario excluyendo "step"
+            raise KeyError("[AUTH] Faltan argumentos en la respuesta del dispositivo IoT.")
         logger.info(f"[AUTH] Datos recibidos del IoT Device: {IoT_M1}")
 
         # Paso 4: Generar parámetros de autenticación y enviarlos a la CA
-        G_nonce = int.from_bytes(os.urandom(1024), "big") % 90000 + 10000
+        G_nonce = int.from_bytes(os.urandom(8), "big")
         logger.info(f"[AUTH] registration_parameters: {registration_parameters}")
         G_MK_G_CA = registration_parameters["G_MK_G_CA"]
-        Gateway_Identity = registration_parameters["Gateway_Identity"]
         G_Sync_K_G_CA = registration_parameters["G_Sync_K_G_CA"]
         returnData = generate_sigma1_sigma2_epison1(
-            G_nonce, G_MK_G_CA, Gateway_Identity, G_Sync_K_G_CA, G_r_1, IoT_M1
+            G_nonce, G_MK_G_CA, G_Sync_K_G_CA, G_r_1, IoT_M1
         )
         iv = returnData[8]
         HashResult = returnData[9]
@@ -206,7 +207,6 @@ def handle_mutual_authentication(client_socket, message):
             "Epison_1_3": message[5],
             "Epison_1_4": message[6],
             "Epison_1_5": message[7],
-            # "iv": iv.hex(),
             "iv": iv,
         }
         ca_response = send_and_receive_persistent_socket(payload)
@@ -224,13 +224,13 @@ def handle_mutual_authentication(client_socket, message):
                 "D_sync_CA_G",
             ]
         ):
-            raise KeyError("[AUTH] Faltan claves en la respuesta de la CA.")
-        CA_sigma_3 = ca_response["CA_sigma_3"]
-        Epison_2_1 = ca_response["Epison_2_1"]
-        Epison_2_2 = ca_response["Epison_2_2"]
-        Epison_2_3 = ca_response["Epison_2_3"]
-        Epison_2_4 = ca_response["Epison_2_4"]
-        D_sync_CA_G = ca_response["D_sync_CA_G"]
+            raise KeyError("[AUTH] Faltan argumentos en la respuesta de la CA.")
+        CA_sigma_3 = ca_response.get("CA_sigma_3")
+        Epison_2_1 = ca_response.get("Epison_2_1")
+        Epison_2_2 = ca_response.get("Epison_2_2")
+        Epison_2_3 = ca_response.get("Epison_2_3")
+        Epison_2_4 = ca_response.get("Epison_2_4")
+        D_sync_CA_G = ca_response.get("D_sync_CA_G")
         logger.info("[AUTH] Claves y parámetros de sincronización recibidos de la CA.")
 
         # Paso 6: Enviar G_M_2 y Sync_IoT_G al dispositivo IoT
@@ -261,7 +261,7 @@ def handle_mutual_authentication(client_socket, message):
             )
 
         returnData = getting_encrypting_next_session_key(
-            data["K_i_next_obfuscated"], iv, HashResult, G_K_a
+            data.get("K_i_next_obfuscated"), iv, HashResult, G_K_a
         )
         Epison_3_1 = returnData[0]
         G_IoT_K_i_next = returnData[1]
@@ -275,11 +275,11 @@ def handle_mutual_authentication(client_socket, message):
         # Paso 9: Recibir M_3 de la CA
         if "M_3" not in ca_response:
             raise KeyError("Falta M_3 en la respuesta de la CA.")
-        CA_M3 = ca_response["M_3"]
+        CA_M3 = ca_response.get("M_3")
         logger.info("[AUTH] Recibido M_3 de la CA.")
 
         # Paso 10: Enviar M_4 al dispositivo IoT
-        K_s_int, M_4 = updatingSynchronizationKeys(
+        K_s_int, M_4 = updating_synchronization_keys(
             CA_M3,
             G_r_1,
             G_r_3,
@@ -292,9 +292,7 @@ def handle_mutual_authentication(client_socket, message):
         session_keys[IoT_M1["ID*"]] = K_s_bytes
         client_socket.sendall(json.dumps({"M_4": M_4}).encode("utf-8"))
         logger.info("[AUTH] Mensaje M_4 enviado al dispositivo IoT.")
-        logger.info(
-            f"[AUTH] Autenticación mutua culminada"
-        )
+        logger.info(f"[AUTH] Autenticación mutua culminada.")
 
     except KeyError as e:
         logger.error(f"Error de clave faltante en los datos recibidos: {e}")
@@ -302,24 +300,21 @@ def handle_mutual_authentication(client_socket, message):
         logger.error(f"Error inesperado durante la autenticación mutua: {e}")
     finally:
         client_socket.close()
-        close_socket()
 
-
-def generate_sigma1_sigma2_epison1(
-    G_nonce, G_MK_G_CA, Gateway_Identity, G_Sync_K_G_CA, G_r_1, IoT_M1
-):
-    G_sigma_1 = Hash(G_MK_G_CA, Gateway_Identity, G_nonce)
-    G_sigma_2 = Hash(G_Sync_K_G_CA, Gateway_Identity, G_nonce)
+def generate_sigma1_sigma2_epison1(G_nonce, G_MK_G_CA, G_Sync_K_G_CA, G_r_1, IoT_M1):
+    global gateway_identity
+    G_sigma_1 = Hash(G_MK_G_CA, gateway_identity, G_nonce)
+    G_sigma_2 = Hash(G_Sync_K_G_CA, gateway_identity, G_nonce)
 
     iv = Random.new().read(AES.block_size)
     h = hashlib.new("sha256")
     h.update(G_Sync_K_G_CA.to_bytes(32, "big"))
     HashResult = bytes(h.hexdigest(), "utf-8")
 
-    IoT_ID_obfuscated = IoT_M1["ID*"]
-    IoT_r_2_obfuscated = IoT_M1["r_2*"]
-    IoT_r_3_obfuscated = IoT_M1["r_3*"]
-    IoT_K_i_obfuscated = IoT_M1["K_i*"]
+    IoT_ID_obfuscated = IoT_M1.get("ID*")
+    IoT_r_2_obfuscated = IoT_M1.get("r_2*")
+    IoT_r_3_obfuscated = IoT_M1.get("r_3*")
+    IoT_K_i_obfuscated = IoT_M1.get("K_i*")
 
     ENC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
     Epison_1_1 = ENC.encrypt(IoT_ID_obfuscated.to_bytes(32, "big"))
@@ -360,9 +355,9 @@ def checking_synchronization_bet_gateway_IoT(
     Epison_2_4 = data[4]
     D_sync_CA_G = data[5]
 
-    IoT_K_i_obfuscated = IoT_M_1["K_i*"]
-    IoT_A_M_1 = IoT_M_1["M_1"]
-    IoT_r_3_obfuscated = IoT_M_1["r_3*"]
+    IoT_K_i_obfuscated = IoT_M_1.get("K_i*")
+    IoT_A_M_1 = IoT_M_1.get("M_1")
+    IoT_r_3_obfuscated = IoT_M_1.get("r_3*")
 
     DEC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
     G_K_before_previous = int.from_bytes(DEC.decrypt(Epison_2_1), "big")
@@ -385,7 +380,7 @@ def checking_synchronization_bet_gateway_IoT(
     G_MK_G_CA = registration_parameters["G_MK_G_CA"]
     assert CA_sigma_3 == Hash(
         G_MK_G_CA, CA_Identity, D_sync_CA_G, G_nonce + 1
-    ), "The authentication of the CA on the gateway side has failed"
+    ), "La autenticación del CA en el lado del Gateway falló."
 
     if IoT_K_i_obfuscated ^ G_K_previous == G_K_current:
         Sync_IoT_G = 0
@@ -393,16 +388,16 @@ def checking_synchronization_bet_gateway_IoT(
         G_r_3 = IoT_r_3_obfuscated ^ G_K_current
         assert IoT_A_M_1 == Hash(
             G_K_current, G_r_1, G_r_3
-        ), "The K_c has not been used in the first authentication message"
+        ), "El K actual (K_c) no ha sido usado en el primer mensaje de autenticación."
     elif IoT_K_i_obfuscated ^ G_K_before_previous == G_K_previous:
         Sync_IoT_G = -1
         G_K_a = G_K_previous
         G_r_3 = IoT_r_3_obfuscated ^ G_K_previous
         assert IoT_A_M_1 == Hash(
             G_K_previous, G_r_1, G_r_3
-        ), "The K_p has not been used in the generation of the authentication message"
+        ), "El K anterior (K_p) no ha sido usado en la generación del mensaje de autenticación."
     else:
-        logger.error("No coinciden las llaves de sinocrnización")
+        logger.error("No coinciden las llaves de sincronización anteriores ni actuales.")
 
     G_M_2 = Hash(G_K_a, Sync_IoT_G, G_r_1, G_r_3)
     registration_parameters["Sync_IoT_G"] = Sync_IoT_G
@@ -418,7 +413,7 @@ def getting_encrypting_next_session_key(IoT_K_i_next_obfuscated, iv, HashResult,
     return Epison_3_1, G_IoT_K_i_next
 
 
-def updatingSynchronizationKeys(
+def updating_synchronization_keys(
     CA_M3,
     G_r_1,
     IoT_r_3,
@@ -431,13 +426,13 @@ def updatingSynchronizationKeys(
     G_K_s = Hash(G_r_1, IoT_r_3, G_K_current)
     logger.info(f"[AUTH] La llave de sesión en el Gateway es: {G_K_s}")
 
-    ####### Update the synchronization keys ###############################
+    # Actualizar las llaves de sincronización
     G_K_before_previous = G_K_previous
     G_K_previous = G_K_current
     G_K_current = G_IoT_K_i_next
     registration_parameters["G_r_1_previous"] = G_r_1
 
-    ##### Update the gateway & CA synchronization keys ###########
+    # Actualizar las llaves de sincronización entre el CA y el Gateay
     registration_parameters["G_Sync_K_G_CA_previous"] = G_Sync_K_G_CA
     G_Sync_K_G_CA = Hash(G_Sync_K_G_CA, G_r_1)
 
@@ -502,7 +497,7 @@ def send_and_receive_persistent_socket(message_dict):
                 )  # Convertir bytes a base64 y luego a str
             else:
                 encoded_message[key] = value
-        #logger.info(f"send_and_receive_persistent_socket- encoded_message={encoded_message}"#)
+        # logger.info(f"send_and_receive_persistent_socket- encoded_message={encoded_message}"#)
         cloud_socket.sendall(
             json.dumps(encoded_message).encode("utf-8")
         )  # Enviar mensaje
@@ -528,9 +523,11 @@ def send_and_receive_persistent_socket(message_dict):
         cloud_socket = None  # Marcar el socket como no válido
         raise e
 
+
 #######################################################
 #                 INTERCAMBIAR MENSAJES               #
 #######################################################
+
 
 def handle_send_metrics(client_socket, message):
     """
@@ -547,12 +544,16 @@ def handle_send_metrics(client_socket, message):
         encrypted_metrics_base64 = message.get("encrypted_metrics")
 
         if not ID_obfuscated or not iv_base64 or not encrypted_metrics_base64:
-            raise ValueError("Faltan campos en el mensaje recibido ('ID_obfuscated', 'iv' o 'encrypted_metrics').")
+            raise ValueError(
+                "Faltan campos en el mensaje recibido ('ID_obfuscated', 'iv' o 'encrypted_metrics')."
+            )
 
         # Buscar la llave de sesión correspondiente
         K_s_bytes = session_keys.get(ID_obfuscated)
         if not K_s_bytes:
-            raise ValueError(f"No se encontró una llave de sesión para ID_obfuscated={ID_obfuscated}.")
+            raise ValueError(
+                f"No se encontró una llave de sesión para ID_obfuscated={ID_obfuscated}."
+            )
 
         # Decodificar IV y las métricas cifradas desde Base64
         iv = base64.b64decode(iv_base64)
@@ -562,25 +563,28 @@ def handle_send_metrics(client_socket, message):
         cipher = AES.new(K_s_bytes, AES.MODE_CBC, iv)
 
         # Descifrar y deshacer el padding de las métricas
-        decrypted_metrics_json = unpad(cipher.decrypt(encrypted_metrics), AES.block_size)
+        decrypted_metrics_json = unpad(
+            cipher.decrypt(encrypted_metrics), AES.block_size
+        )
 
         # Convertir las métricas descifradas de JSON a diccionario
-        metrics = json.loads(decrypted_metrics_json.decode('utf-8'))
+        metrics = json.loads(decrypted_metrics_json.decode("utf-8"))
         logger.info(f"[METRICS] Métricas recibidas descifradas: {metrics}")
 
         # Enviar respuesta al dispositivo IoT
         response = {"status": "success", "message": "Métricas recibidas correctamente."}
-        client_socket.sendall(json.dumps(response).encode('utf-8'))
+        client_socket.sendall(json.dumps(response).encode("utf-8"))
         logger.info("[METRICS] Respuesta enviada al dispositivo IoT.")
 
     except (ValueError, KeyError) as e:
         logger.error(f"[METRICS] Error en el mensaje recibido: {e}")
         response = {"status": "error", "message": str(e)}
-        client_socket.sendall(json.dumps(response).encode('utf-8'))
+        client_socket.sendall(json.dumps(response).encode("utf-8"))
     except Exception as e:
         logger.error(f"[METRICS] Error inesperado durante el manejo de métricas: {e}")
         response = {"status": "error", "message": "Error inesperado."}
-        client_socket.sendall(json.dumps(response).encode('utf-8'))
+        client_socket.sendall(json.dumps(response).encode("utf-8"))
+
 
 if __name__ == "__main__":
     logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8010.")

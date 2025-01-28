@@ -16,7 +16,7 @@ services:
     command: 
     - '-config.file=/mnt/config/loki-config.yml'
     networks:
-      - iot_network
+      - mapfs_network
   
   grafana:
     image: grafana/grafana:10.0.2
@@ -27,7 +27,7 @@ services:
     ports:
     - 3000:3000
     networks:
-      - iot_network
+      - mapfs_network
 
   prometheus:
     image: prom/prometheus:v2.47.0
@@ -44,7 +44,7 @@ services:
     - '--storage.tsdb.retention.time=1y'
     - '--web.enable-lifecycle'
     networks:
-      - iot_network
+      - mapfs_network
 
   node_exporter:
     image: quay.io/prometheus/node-exporter:v1.6.1
@@ -62,7 +62,7 @@ services:
       - --collector.filesystem.ignored-mount-points
       - "^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns|rootfs/var/lib/docker/aufs)($$|/)"
     networks:
-      - iot_network
+      - mapfs_network
 
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.47.1
@@ -80,18 +80,16 @@ services:
       # Proporciona acceso a las estadísticas del kernel
       - /sys:/sys:ro
     privileged: true
-    #command:
-    #- --enable_load_reader=false
     networks:
-      - iot_network
+      - mapfs_network
 
-  skafs-cloud:
+  mapfs-cloud:
     build:
       context: ./IoT
-      dockerfile: ./cloud/Dockerfile
-    container_name: skafs-cloud
+      dockerfile: ./cloud/MAPFS/Dockerfile
+    container_name: mapfs-cloud
     networks:
-      - iot_network
+      - mapfs_network
     volumes:
       - ./Monitoreo/logs/cloud:/logs
     logging:
@@ -102,17 +100,17 @@ services:
       - 8001:8001 #API
       - 8011:8011 #Prometheus
       - 5001:5001 #Socket
-    command: ["python", "-m", "cloud.SKAFS-CA"]
+    command: ["python", "-m", "cloud.mapfs_cloud"]
 
-  skafs-gateway:
+  mapfs-gateway:
     build:
       context: ./IoT
-      dockerfile: ./gateway/Dockerfile
-    container_name: skafs-gateway
+      dockerfile: ./gateway/MAPFS/Dockerfile
+    container_name: mapfs-gateway
     depends_on:
-      - skafs-cloud
+      - mapfs-cloud
     networks:
-      - iot_network
+      - mapfs_network
     volumes:
       - ./Monitoreo/logs/gateway:/logs
     logging:
@@ -122,16 +120,16 @@ services:
     ports:
       - 8010:8010 #Prometheus
       - 5000:5000 #Socket
-    command: ["python", "-m", "gateway.SKAFS-Gateway"]
+    command: ["python", "-m", "gateway.mapfs_gateway"]
   
-  skafs-device:
+  mapfs-device:
     build:
       context: ./IoT
-      dockerfile: ./device/Dockerfile
+      dockerfile: ./device/MAPFS/Dockerfile
     depends_on:
-      - skafs-gateway
+      - mapfs-gateway
     networks:
-      - iot_network
+      - mapfs_network
     logging:
       driver: loki
       options:
@@ -140,8 +138,8 @@ services:
       - ./Monitoreo/logs/device:/logs
     ports:
       - 8012:8012 #Prometheus
-    command: ["python", "-m", "device.SKAFS-Device"]
+    command: ["python", "-m", "device.mapfs_device"]
 
 networks:
-  iot_network:
+  mapfs_network:
     driver: bridge
