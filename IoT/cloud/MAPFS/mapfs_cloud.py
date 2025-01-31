@@ -334,6 +334,7 @@ def decode_message(encoded_message_dict):
     return decoded_message
 
 if __name__ == "__main__":
+    time.sleep(100)
     # Inicia el servidor de métricas Prometheus
     logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8011.")
     start_http_server(8011, addr="0.0.0.0")

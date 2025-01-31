@@ -165,7 +165,6 @@ def mutual_authentication():
         # Paso 3: Calcular claves y parámetros cifrados al IoT Gateway
         message, r_3, K_i = IoT_obfuscation_for_R_2_ID(G_r_1)
 
-        logger.info(f"message={message}.")
         ## message = (A_M_1, ID_obfuscated, r_2_obfuscated, K_i_obfuscated, r_3_obfuscated)
         payload = {
             "step": "step3",
@@ -264,8 +263,11 @@ def compute_next_session_key(data, G_r_1, r_3, K_i, C_1, state):
     K_i = DPUF(C_1, state)
     K_i_next = DPUF(Hash(C_1), Hash(state))
     K_i_next_obfuscated = K_i_next ^ K_i
+    
     K_s_int = Hash(G_r_1, r_3, K_i)
+    K_s_int = int(str(K_s_int)[:16])
     K_s_bytes = K_s_int.to_bytes(AES.block_size, "big")
+    
     logger.info(f"[AUTH] La llave de sesión en el dispositivo IoT es: {K_s_int}")
     return K_i_next_obfuscated, K_s_int, state, C_1
 

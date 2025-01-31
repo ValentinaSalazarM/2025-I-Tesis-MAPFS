@@ -288,6 +288,7 @@ def handle_mutual_authentication(client_socket, message):
             G_IoT_K_i_next,
             G_Sync_K_G_CA,
         )
+        K_s_int = int(str(K_s_int)[:16])
         K_s_bytes = K_s_int.to_bytes(AES.block_size, "big")
         session_keys[IoT_M1["ID*"]] = K_s_bytes
         client_socket.sendall(json.dumps({"M_4": M_4}).encode("utf-8"))

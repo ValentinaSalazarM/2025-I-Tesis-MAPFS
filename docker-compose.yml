@@ -1,0 +1,75 @@
+services:
+  mapfs-cloud:
+    build:
+      context: ./IoT
+      dockerfile: ./cloud/MAPFS/Dockerfile
+    container_name: mapfs-cloud
+    networks:
+      - mapfs_network
+    volumes:
+      - ./Monitoreo/logs/cloud:/logs
+    logging:
+      driver: loki
+      options:
+        loki-url: "http://localhost:3100/loki/api/v1/push"  
+    ports:
+      - 8001:8001 #API
+      - 8011:8011 #Prometheus
+      - 5001:5001 #Socket
+    command: ["python", "-m", "cloud.mapfs_cloud"]
+
+  mapfs-gateway:
+    build:
+      context: ./IoT
+      dockerfile: ./gateway/MAPFS/Dockerfile
+    container_name: mapfs-gateway
+    depends_on:
+      - mapfs-cloud
+    networks:
+      - mapfs_network
+    volumes:
+      - ./Monitoreo/logs/gateway:/logs
+    logging:
+      driver: loki
+      options:
+        loki-url: "http://localhost:3100/loki/api/v1/push"  
+    ports:
+      - 8010:8010 #Prometheus
+      - 5000:5000 #Socket
+    command: ["python", "-m", "gateway.mapfs_gateway"]
+  
+  mapfs-device:
+    build:
+      context: ./IoT
+      dockerfile: ./device/MAPFS/Dockerfile
+    container_name: mapfs-device
+    depends_on:
+      - mapfs-gateway
+    networks:
+      - mapfs_network
+    logging:
+      driver: loki
+      options:
+        loki-url: "http://localhost:3100/loki/api/v1/push"  
+    volumes:
+      - ./Monitoreo/logs/device:/logs
+    ports:
+      - 8012:8012 #Prometheus
+    command: ["python", "-m", "device.mapfs_device"]
+
+  sniffer:
+    build:
+      context: ./Sniffing
+      dockerfile: Dockerfile
+    network_mode: host  # Capturar tráfico del host
+    volumes:
+      - ./Sniffing/captures:/captures
+      - ./Sniffing/scripts:/scripts  # Carpeta para el script de Python
+      - /var/run/docker.sock:/var/run/docker.sock  # Montar el Docker socket
+      - ./Sniffing/logs/:/logs
+    cap_add:
+      - NET_ADMIN # Permiso para sniffing
+    command: ["python", "-m", "sniffer_controller"]
+networks:
+  mapfs_network:
+    driver: bridge

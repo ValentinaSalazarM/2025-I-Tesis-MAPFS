@@ -267,7 +267,6 @@ def gateway_auth_on_IoT_side(gateway_auth_token, random_nonces, A):
     A_yValue = (rng_1 * x_a_priv_key * W).y
 
     K_s_int = Hash_MAPFS([A_xValue, A_yValue])
-    logger.info(f"[AUTH] La llave de sesión en el dispositivo IoT es: {K_s_int}")
     K_s_int = int(str(K_s_int)[:16])
     K_s_bytes = K_s_int.to_bytes(AES.block_size, "big")
     logger.info(f"[AUTH] La llave de sesión en el dispositivo IoT es: {K_s_int}")
@@ -484,6 +483,7 @@ def send_and_receive_persistent_socket(message_dict):
         raise e
 
 if __name__ == "__main__":
+    time.sleep(180)
     logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8012.")
     start_http_server(8012)
     IoT_registration()

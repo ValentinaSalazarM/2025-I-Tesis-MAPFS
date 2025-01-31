@@ -496,6 +496,7 @@ def handle_send_metrics(client_socket, message):
         client_socket.sendall(json.dumps(response).encode("utf-8"))
 
 if __name__ == "__main__":
+    time.sleep(120)
     logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8010.")
     start_http_server(8010)
     gateway_registration()
