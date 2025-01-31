@@ -176,6 +176,7 @@ def mutual_authentication():
 
         first_request = {
             "operation": "mutual_authentication",
+            "h_a": registration_parameters.get("h_a"),
             "step": "hello",
             "one_time_public_key": A_dict,
         }
@@ -228,53 +229,48 @@ def gateway_auth_on_IoT_side(gateway_auth_token, random_nonces, A):
 
     W_dict = gateway_auth_token.get("W")
     W = Point(W_dict.get("x"), W_dict.get("y"), curve=P256)
-    logger.info("W generado")
         
     Y_w_pub_key_dict = gateway_auth_token.get("Y_w_pub_key")
     Y_w_pub_key = Point(
         Y_w_pub_key_dict.get("x"), Y_w_pub_key_dict.get("y"), curve=P256
     )
-    logger.info("Y_w generado")
-
     sigma_z = gateway_auth_token.get("sigma_z")
 
     # Cómputo de I_g
-    I_g = Hash(A.x, A.y, W_dict.get("x"), W_dict.get("y"))
+    I_g = Hash_MAPFS([A.x, A.y, W_dict.get("x"), W_dict.get("y")])
 
     # Cómputo de H_1
     X_w_pub_key_dict = gateway_auth_token.get("X_w_pub_key")
-    logger.info(f"X_w_pub_key_dict = {X_w_pub_key_dict}")
-    h_w = Hash(
-        ID_w,
+    h_w = Hash_MAPFS(
+        [
         X_w_pub_key_dict.get("x"),
         X_w_pub_key_dict.get("y"),
         Pub_gc_key_xValue,
         Pub_gc_key_yValue,
         Y_w_pub_key_dict.get("x"),
-        Y_w_pub_key_dict.get("y"),
+        Y_w_pub_key_dict.get("y"),]
     )
 
     # Verificar la firma del Gateway
     Pub_gc_key = Point(Pub_gc_key_xValue, Pub_gc_key_yValue, curve=P256)
     P_IoT_key = Point(P_IoT_key_xValue, P_IoT_key_yValue, curve=P256)
-
-    logger.info(f"sigma_z = {sigma_z}")
-    logger.info(f"I_g = {I_g}")
-    logger.info(f"Pub_gc_key = {Pub_gc_key}")
-    logger.info(f"h_w = {h_w}")
-    logger.info(f"W = {W}")
    
-    #assert sigma_z*P256.G == (I_g * Pub_gc_key + I_g * h_w * Y_w_pub_key + W), "Error en la autenticación de la firma del Gateway."
+    assert sigma_z*P256.G == (I_g * Pub_gc_key + I_g * h_w * Y_w_pub_key + W), "Error en la autenticación de la firma del Gateway."
+
+    logger.info("[AUTH] Autenticación de la firma del Gateway exitosa.")
 
     # Cómputo de H_0
     rng_1 = random_nonces[0]
     x_a_priv_key = registration_parameters.get("x_a_priv_key")
 
-    A_xValue = (rng_1 * x_a_priv_key * W).x.to_bytes(32, "big")
-    A_yValue = (rng_1 * x_a_priv_key * W).y.to_bytes(32, "big")
+    A_xValue = (rng_1 * x_a_priv_key * W).x
+    A_yValue = (rng_1 * x_a_priv_key * W).y
 
-    K_s_int = Hash(A_xValue, A_yValue)
+    K_s_int = Hash_MAPFS([A_xValue, A_yValue])
+    logger.info(f"[AUTH] La llave de sesión en el dispositivo IoT es: {K_s_int}")
+    K_s_int = int(str(K_s_int)[:16])
     K_s_bytes = K_s_int.to_bytes(AES.block_size, "big")
+    logger.info(f"[AUTH] La llave de sesión en el dispositivo IoT es: {K_s_int}")
 
     rng_2 = random_nonces[1]
     rng_3 = random_nonces[2]
@@ -286,6 +282,7 @@ def gateway_auth_on_IoT_side(gateway_auth_token, random_nonces, A):
     )
 
     h_a = registration_parameters.get("h_a")
+
 
     # Cómputo del punto base
     P_1 = rng_2 * Y_a_pub_key
@@ -316,9 +313,8 @@ def gateway_auth_on_IoT_side(gateway_auth_token, random_nonces, A):
     T_2_dict = {"x": T_2_xValue, "y": T_2_yValue}
 
     # Función de hash H_4(A,P_1,P_2,P_3,T_1,T_2,W)
-    
-    I_a = Hash(
-        A.x,
+    I_a = Hash_MAPFS(
+        [A.x,
         A.y,
         P_1_xValue,
         P_1_yValue,
@@ -331,13 +327,14 @@ def gateway_auth_on_IoT_side(gateway_auth_token, random_nonces, A):
         T_2_xValue,
         T_2_yValue,
         W_dict.get("x"),
-        W_dict.get("y"),
+        W_dict.get("y"),]
     )
 
     sigma_a = registration_parameters.get("sigma_a")
 
     # Cómputo de la firma aleatoria que será verificada por el Gateway
     sigma_t = (I_a * rng_2 * sigma_a + rng_1 * x_a_priv_key) % P256.q
+    logger.info(f"[AUTH] Cómputo de la firma del dispositivo IoT completada.") 
 
     # cómputo de las respuestas de ZKP
     s_1 = (rng_2 * I_a + rng_3) % P256.q
@@ -378,6 +375,7 @@ def message_authetication():
             # Construir el mensaje para enviar al Gateway
             payload = {
                 "operation": "send_metrics",
+                "h_a": registration_parameters.get("h_a"),
                 "iv": base64.b64encode(iv).decode("utf-8"),
                 "encrypted_metrics": base64.b64encode(encrypted_metrics).decode(
                     "utf-8"
@@ -485,10 +483,10 @@ def send_and_receive_persistent_socket(message_dict):
         gateway_socket = None  # Marcar el socket como no válido
         raise e
 
-
 if __name__ == "__main__":
     logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8012.")
     start_http_server(8012)
     IoT_registration()
     mutual_authentication()
-    # message_authetication()
+    message_authetication()
+

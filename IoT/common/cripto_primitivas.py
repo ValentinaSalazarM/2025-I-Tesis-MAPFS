@@ -23,6 +23,16 @@ def Hash(*dataListByte):
     Hash_value = HashInt % P256.q
     return Hash_value
 
+def Hash_MAPFS(dataListByte):
+    h = hashlib.new("sha256")
+    result = dataListByte[0].to_bytes(32, 'big')
+    for i in range(1, len(dataListByte)):
+        result += (dataListByte[i].to_bytes(32, 'big'))
+    h.update(result)
+    HashResult = h.hexdigest()
+    HashInt = int(HashResult, 16)
+    Hash_value = HashInt % P256.q
+    return Hash_value
 
 def FPUF(Challenge):
     h = hashlib.new("sha256")

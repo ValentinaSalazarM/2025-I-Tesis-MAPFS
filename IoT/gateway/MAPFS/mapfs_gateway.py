@@ -229,10 +229,12 @@ def handle_mutual_authentication(client_socket, hello_message):
             raise KeyError(
                 "[AUTH] Faltan argumentos en la respuesta del dispositivo IoT."
             )
-
+        logger.info(
+            f"[AUTH] Puntos, compromisos y respuestas ZKP del dispositivo recibidos."
+        )
         # Realizar los cálculos de verificación sobre el token de autenticación del dispositivo
         W_dict = generated_data[0]
-        rng_5 = generated_data[4]
+        rng_5 = generated_data[2]
         IoT_Authentication(iot_auth_token, hello_message, W_dict, rng_5)
 
         # Enviar respuesta al dispositivo IoT
@@ -269,7 +271,7 @@ def generating_gateway_auth_token(hello_data):
     A_xValue = A_dict.get("x")
     A_yValue = A_dict.get("y")
 
-    I_g = Hash(A_xValue, A_yValue, W_xValue, W_yValue)
+    I_g = Hash_MAPFS([A_xValue, A_yValue, W_xValue, W_yValue])
 
     sigma_w = registration_parameters.get("sigma_w")
     x_w_priv_key = registration_parameters.get("x_w_priv_key")
@@ -279,36 +281,36 @@ def generating_gateway_auth_token(hello_data):
     return W_dict, sigma_z, rng_5
 
 
-def IoT_Authentication(ioT_auth_token, hello_data, W_dict, rng_5):
-    global registration_parameters, P_IoT_key_xValue, P_IoT_key_yValue, K_s_bytes
+def IoT_Authentication(iot_auth_token, hello_data, W_dict, rng_5):
+    global registration_parameters, P_IoT_key_xValue, P_IoT_key_yValue
 
     # Inicializar las variables recibidas
-    P_1_dict = ioT_auth_token.get("P_1")
+    P_1_dict = iot_auth_token.get("P_1")
     P_1 = Point(P_1_dict.get("x"), P_1_dict.get("y"), curve=P256)
 
-    P_2_dict = ioT_auth_token.get("P_2")
+    P_2_dict = iot_auth_token.get("P_2")
     P_2 = Point(P_2_dict.get("x"), P_2_dict.get("y"), curve=P256)
 
-    P_3_dict = ioT_auth_token.get("P_3")
+    P_3_dict = iot_auth_token.get("P_3")
     P_3 = Point(P_3_dict.get("x"), P_3_dict.get("y"), curve=P256)
 
-    sigma_t = ioT_auth_token.get("sigma_t")
+    sigma_t = iot_auth_token.get("sigma_t")
 
-    T_1_dict = ioT_auth_token.get("T_1")
+    T_1_dict = iot_auth_token.get("T_1")
     T_1 = Point(T_1_dict.get("x"), T_1_dict.get("y"), curve=P256)
 
-    T_2_dict = ioT_auth_token.get("T_2")
+    T_2_dict = iot_auth_token.get("T_2")
     T_2 = Point(T_2_dict.get("x"), T_2_dict.get("y"), curve=P256)
 
-    s_1 = ioT_auth_token.get("s_1")
-    s_2 = ioT_auth_token.get("s_2")
+    s_1 = iot_auth_token.get("s_1")
+    s_2 = iot_auth_token.get("s_2")
 
     A_dict = hello_data.get("one_time_public_key")
     A = Point(A_dict.get("x"), A_dict.get("y"), curve=P256)
 
     # Cómputo de I_a
-    I_a = Hash(
-        A_dict.get("x"),
+    I_a = Hash_MAPFS(
+        [A_dict.get("x"),
         A_dict.get("y"),
         P_1_dict.get("x"),
         P_1_dict.get("y"),
@@ -321,14 +323,10 @@ def IoT_Authentication(ioT_auth_token, hello_data, W_dict, rng_5):
         T_2_dict.get("x"),
         T_2_dict.get("y"),
         W_dict.get("x"),
-        W_dict.get("y"),
+        W_dict.get("y"),]
     )
-
-    # Generar un punto en la curva elíptica
-
-    # Verificar la firma del IoT
     logger.info(
-        f"[AUTH] Comparando valores: {sigma_t*P256.G} == {I_a * P_1 + I_a * P_2 + I_a * P_3 + A}"
+        "[AUTH] Verificando la firma del IoT."
     )
     assert sigma_t * P256.G == (
         I_a * P_1 + I_a * P_2 + I_a * P_3 + A
@@ -342,14 +340,19 @@ def IoT_Authentication(ioT_auth_token, hello_data, W_dict, rng_5):
     ), "Error verificando la llave pública del CA.."
     assert s_2 * P_1 == (I_a * P_3 + T_2), "Error verificando I_1"
 
+    logger.info(
+        "[AUTH] Llave pública del CA y I_1 verificados."
+    )
     # Función de hash H_0(r_5x_wA)
     x_w_priv_key = registration_parameters.get("x_w_priv_key")
     A_xValue = (rng_5 * x_w_priv_key * A).x
     A_yValue = (rng_5 * x_w_priv_key * A).y
 
-    K_s_int = Hash(A_xValue + A_yValue)
+    K_s_int = Hash_MAPFS([A_xValue, A_yValue])
+    K_s_int = int(str(K_s_int)[:16])
+    logger.info(f"[AUTH] La llave de sesión en el gateway es: {K_s_int}")
     K_s_bytes = K_s_int.to_bytes(AES.block_size, "big")
-
+    session_keys[hello_data.get("h_a")] = K_s_bytes
 
 #######################################################
 #                      AUXILIARES                     #
@@ -446,20 +449,20 @@ def handle_send_metrics(client_socket, message):
     """
     try:
         # Extraer los campos necesarios del mensaje
-        ID_obfuscated = message.get("ID_obfuscated")
+        ID_obfuscated = message.get("h_a")
         iv_base64 = message.get("iv")
         encrypted_metrics_base64 = message.get("encrypted_metrics")
 
         if not ID_obfuscated or not iv_base64 or not encrypted_metrics_base64:
             raise ValueError(
-                "Faltan campos en el mensaje recibido ('ID_obfuscated', 'iv' o 'encrypted_metrics')."
+                "Faltan campos en el mensaje recibido ('h_a', 'iv' o 'encrypted_metrics')."
             )
 
         # Buscar la llave de sesión correspondiente
         K_s_bytes = session_keys.get(ID_obfuscated)
         if not K_s_bytes:
             raise ValueError(
-                f"No se encontró una llave de sesión para ID_obfuscated={ID_obfuscated}."
+                f"No se encontró una llave de sesión para h_a={ID_obfuscated}."
             )
 
         # Decodificar IV y las métricas cifradas desde Base64
@@ -491,7 +494,6 @@ def handle_send_metrics(client_socket, message):
         logger.error(f"[METRICS] Error inesperado durante el manejo de métricas: {e}")
         response = {"status": "error", "message": "Error inesperado."}
         client_socket.sendall(json.dumps(response).encode("utf-8"))
-
 
 if __name__ == "__main__":
     logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8010.")

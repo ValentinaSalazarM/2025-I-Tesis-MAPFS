@@ -151,13 +151,13 @@ def handle_IoT_registration(client_socket):
         Y_a_pub_key_yValue = Y_a_pub_key.y
         Y_a_pub_key_dict = {"x": Y_a_pub_key_xValue, "y": Y_a_pub_key_yValue}
         
-        h_a = Hash(
-            X_a_pub_key_xValue,
+        h_a = Hash_MAPFS(
+            [X_a_pub_key_xValue,
             X_a_pub_key_yValue,
-            Pub_gc_key_xValue,
-            Pub_gc_key_yValue,
             Y_a_pub_key_xValue,
             Y_a_pub_key_yValue,
+            Pub_gc_key_xValue,
+            Pub_gc_key_yValue,]
         )
         
         sigma_a = (s_IoT_priv_key + h_a * y_a_priv_key + y_a_priv_key) % P256.q
@@ -245,13 +245,13 @@ def handle_gateway_registration(client_socket):
         Y_w_pub_key_yValue = Y_w_pub_key.y
         Y_w_pub_key_dict = {"x": Y_w_pub_key_xValue, "y": Y_w_pub_key_yValue}
         
-        h_w = Hash(
-            X_w_pub_key_xValue,
+        h_w = Hash_MAPFS(
+            [X_w_pub_key_xValue,
             X_w_pub_key_yValue,
             Pub_gc_key_xValue,
             Pub_gc_key_yValue,
             Y_w_pub_key_xValue,
-            Y_w_pub_key_yValue,
+            Y_w_pub_key_yValue,]
         )
         sigma_w = (s_gc_priv_key + h_w * y_w_priv_key) % P256.q
 
@@ -333,20 +333,8 @@ def decode_message(encoded_message_dict):
             decoded_message[key] = value
     return decoded_message
 
-
 if __name__ == "__main__":
     # Inicia el servidor de métricas Prometheus
     logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8011.")
     start_http_server(8011, addr="0.0.0.0")
-
-    # Crear hilos para la API y el servidor de sockets
-    # api_thread = threading.Thread(target=startApiServer)
-    socket_thread = threading.Thread(target=start_cloud_socket)
-
-    # Iniciar ambos hilos
-    # api_thread.start()
-    socket_thread.start()
-
-    # Esperar a que los hilos terminen
-    # api_thread.join()
-    socket_thread.join()
+    start_cloud_socket()
