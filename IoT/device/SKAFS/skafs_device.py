@@ -1,12 +1,3 @@
-import base64
-import binascii
-import requests
-import logging
-import random
-import socket
-import json
-import os
-
 from common.cripto_primitivas import *
 
 # Métricas
@@ -167,7 +158,7 @@ def mutual_authentication():
 
         ## message = (A_M_1, ID_obfuscated, r_2_obfuscated, K_i_obfuscated, r_3_obfuscated)
         payload = {
-            "step": "step3",
+            "operation": "mutual_authentication",
             "M_1": message[0],
             "ID*": message[1],
             "r_2*": message[2],
@@ -188,7 +179,7 @@ def mutual_authentication():
         )
 
         # Paso 5: Enviar claves obfuscadas para la siguiente sesión
-        payload = {"step": "step5", "K_i_next_obfuscated": message}
+        payload = {"operation": "mutual_authentication", "K_i_next_obfuscated": message}
         response = send_and_receive_persistent_socket(payload)
         logger.info("[AUTH] Claves obfuscadas enviadas al Gateway.")
 
@@ -418,8 +409,12 @@ def send_and_receive_persistent_socket(message_dict):
         raise e
 
 if __name__ == "__main__":
+    time.sleep(15)
+     # Inicia el servidor de métricas Prometheus
     logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8012.")
     start_http_server(8012)
+    # Realiza el registro y la autenticación mutua
     IoT_registration()
     mutual_authentication()
+    # Simula el envío de métricas al Gateway
     message_authetication()

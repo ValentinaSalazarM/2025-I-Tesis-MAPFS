@@ -1,12 +1,3 @@
-import binascii
-import requests
-import logging
-import random
-import socket
-import json
-import base64
-import os
-
 from common.cripto_primitivas import *
 
 # Métricas
@@ -137,6 +128,7 @@ def gateway_registration():
         X_w_pub_key_dict = {"x": X_w_pub_key_xValue, "y": X_w_pub_key_yValue}
 
         second_payload = {
+            "operation": "register_gateway",
             "Gateway_Identity": gateway_identity,
             "X_w_pub_key": X_w_pub_key_dict,
         }
@@ -208,6 +200,7 @@ def handle_mutual_authentication(client_socket, hello_message):
         Y_w_pub_key_dict = registration_parameters.get("Y_w_pub_key")
 
         gateway_auth_token = {
+            "operation": "mutual_authentication",
             "W": generated_data[0],
             "ID_w": gateway_identity,
             "X_w_pub_key": X_w_pub_key_dict,
@@ -238,7 +231,7 @@ def handle_mutual_authentication(client_socket, hello_message):
         IoT_Authentication(iot_auth_token, hello_message, W_dict, rng_5)
 
         # Enviar respuesta al dispositivo IoT
-        response = {"status": "success"}
+        response = {"operation": "mutual_authentication", "status": "success"}
         client_socket.sendall(json.dumps(response).encode("utf-8"))
         logger.info(f"[AUTH] Autenticación mutua culminada.")
 
@@ -496,8 +489,13 @@ def handle_send_metrics(client_socket, message):
         client_socket.sendall(json.dumps(response).encode("utf-8"))
 
 if __name__ == "__main__":
-    time.sleep(120)
+    time.sleep(10)
+    # Inicia el servidor de métricas Prometheus
     logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8010.")
     start_http_server(8010)
+    
+    # Realiza el registro ante el CA
     gateway_registration()
+    
+    # Inicia el socket
     start_gateway_socket()

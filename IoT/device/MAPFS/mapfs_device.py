@@ -1,12 +1,3 @@
-import base64
-import binascii
-import requests
-import logging
-import random
-import socket
-import json
-import os
-
 from common.cripto_primitivas import *
 
 # Métricas
@@ -98,6 +89,7 @@ def IoT_registration():
             h_x_pub_key_dict = {"x": h_x_pub_key_xValue, "y": h_x_pub_key_yValue}
 
             second_payload = {
+                "operation": "register_device",
                 "IoT_Identity": iot_identity,
                 "X_a_pub_key": X_a_pub_key_dict,
                 "h_x": h_x_pub_key_dict,
@@ -196,6 +188,7 @@ def mutual_authentication():
         )
         generated_data = gateway_auth_on_IoT_side(first_response, random_nonces, A)
         second_request = {
+            "operation": "mutual_authentication",
             "P_1": generated_data[0],
             "P_2": generated_data[1],
             "P_3": generated_data[2],
@@ -281,7 +274,6 @@ def gateway_auth_on_IoT_side(gateway_auth_token, random_nonces, A):
     )
 
     h_a = registration_parameters.get("h_a")
-
 
     # Cómputo del punto base
     P_1 = rng_2 * Y_a_pub_key
@@ -483,10 +475,13 @@ def send_and_receive_persistent_socket(message_dict):
         raise e
 
 if __name__ == "__main__":
-    time.sleep(180)
+    time.sleep(15)
+     # Inicia el servidor de métricas Prometheus
     logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8012.")
     start_http_server(8012)
+    # Realiza el registro y la autenticación mutua
     IoT_registration()
+    # Simula el envío de métricas al Gateway
     mutual_authentication()
-    message_authetication()
+    #message_authetication()
 

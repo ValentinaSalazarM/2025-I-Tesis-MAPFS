@@ -12,4 +12,4 @@ WORKDIR /scripts
 RUN pip install -r requirements.txt
 
 # Especifica el comando de inicio para el Cloud
-CMD ["python", "-m", "sniffer_controller"]
+CMD ["python", "-m", "capture_script"]

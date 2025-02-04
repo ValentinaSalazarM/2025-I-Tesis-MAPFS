@@ -1,12 +1,3 @@
-import binascii
-import requests
-import logging
-import socket
-import base64
-import json
-import os
-import threading
-
 from common.cripto_primitivas import *
 
 # Métricas
@@ -85,7 +76,7 @@ def handle_client_connection(client_socket):
         if not operation:
             raise ValueError("Falta el campo 'operation' en el mensaje recibido.")
 
-        # Redirigir a la función correspondiente            
+        # Redirigir a la función correspondiente
         if operation == "register_gateway":
             handle_gateway_registration(client_socket)
         elif operation == "register_device":
@@ -111,23 +102,24 @@ def handle_IoT_registration(client_socket):
     """
     Manejar el registro del dispositivo IoT.
     """
-    global registered_devices, Pub_gc_key_xValue, Pub_gc_key_yValue, P_IoT_key_xValue, P_IoT_key_yValue
-    
+    global registered_devices, payload_public_keys, Pub_gc_key_xValue, Pub_gc_key_yValue, P_IoT_key_xValue, P_IoT_key_yValue
+
     try:
         # Enviar parámetros públicos al dispositivo
+        payload_public_keys["operation"] = "register"
         public_parameters = encode_message(payload_public_keys)
         client_socket.sendall(json.dumps(public_parameters).encode("utf-8"))
         logger.info(
-        f"[REG Dispositivo] Enviar parámetros públicos: {public_parameters}"
+            f"[REG Dispositivo] Enviar parámetros públicos: {public_parameters}"
         )
-        
+
         # Paso 1: Generación de las llaves del dispositivo
         y_a_priv_key, Y_a_pub_key = keys.gen_keypair(P256)
-        
+
         # Paso 2: Recibir IoT_identity, X_a_pub_key, h_x del dispositivo
         first_request = client_socket.recv(4096)
         first_message = decode_message(json.loads(first_request.decode("utf-8")))
-        
+
         iot_identity = first_message.get("IoT_Identity")
         X_a_pub_key_dict = first_message.get("X_a_pub_key")
         h_x_dict = first_message.get("h_x")
@@ -146,20 +138,22 @@ def handle_IoT_registration(client_socket):
         # Generar los valores de las claves públicas como bytes
         X_a_pub_key_xValue = X_a_pub_key_dict.get("x")
         X_a_pub_key_yValue = X_a_pub_key_dict.get("y")
-                
+
         Y_a_pub_key_xValue = Y_a_pub_key.x
         Y_a_pub_key_yValue = Y_a_pub_key.y
         Y_a_pub_key_dict = {"x": Y_a_pub_key_xValue, "y": Y_a_pub_key_yValue}
-        
+
         h_a = Hash_MAPFS(
-            [X_a_pub_key_xValue,
-            X_a_pub_key_yValue,
-            Y_a_pub_key_xValue,
-            Y_a_pub_key_yValue,
-            Pub_gc_key_xValue,
-            Pub_gc_key_yValue,]
+            [
+                X_a_pub_key_xValue,
+                X_a_pub_key_yValue,
+                Y_a_pub_key_xValue,
+                Y_a_pub_key_yValue,
+                Pub_gc_key_xValue,
+                Pub_gc_key_yValue,
+            ]
         )
-        
+
         sigma_a = (s_IoT_priv_key + h_a * y_a_priv_key + y_a_priv_key) % P256.q
 
         # Paso 3: Registrar el dispositivo
@@ -178,7 +172,12 @@ def handle_IoT_registration(client_socket):
         )
 
         # Enviar sigma_a, Y_a_pub_key y h_a al dispositivo
-        response = {"sigma_a": sigma_a, "Y_a_pub_key": Y_a_pub_key_dict, "h_a": h_a}
+        response = {
+            "operation": "register",
+            "sigma_a": sigma_a,
+            "Y_a_pub_key": Y_a_pub_key_dict,
+            "h_a": h_a,
+        }
         encoded_response = encode_message(response)
         client_socket.sendall(json.dumps(encoded_response).encode("utf-8"))
         logger.info("[REG Dispositivo] Respuesta enviada al dispositivo IoT.")
@@ -206,23 +205,22 @@ def handle_gateway_registration(client_socket):
     """
     Manejar el registro del Gateway.
     """
-    global registered_gateways, Pub_gc_key_xValue, Pub_gc_key_yValue, P_IoT_key_xValue, P_IoT_key_yValue
+    global registered_gateways, payload_public_keys, Pub_gc_key_xValue, Pub_gc_key_yValue, P_IoT_key_xValue, P_IoT_key_yValue
 
     try:
-        # Enviar parámetros públicos al dispositivo
+        # Enviar parámetros públicos al gateway
+        payload_public_keys["operation"] = "register"
         public_parameters = encode_message(payload_public_keys)
         client_socket.sendall(json.dumps(public_parameters).encode("utf-8"))
-        logger.info(
-        f"[REG Gateway] Enviar parámetros públicos: {public_parameters}"
-        )
-        
+        logger.info(f"[REG Gateway] Enviar parámetros públicos: {public_parameters}")
+
         # Paso 1: Generación de las llaves del gateway
         y_w_priv_key, Y_w_pub_key = keys.gen_keypair(P256)
 
         # Paso 2: Recibir Gateway_Identity, X_w_pub_key del gateway
         first_response = client_socket.recv(4096)
         first_message = json.loads(first_response.decode("utf-8"))
-        
+
         gateway_identity = first_message.get("Gateway_Identity")
         X_w_pub_key_dict = first_message.get("X_w_pub_key")
 
@@ -236,7 +234,7 @@ def handle_gateway_registration(client_socket):
         logger.info(
             f"[REG Gateway] Recibidos datos del gateway: Gateway_Identity={gateway_identity}, X_w_pub_key={X_w_pub_key_dict}"
         )
-        
+
         # Generar los valores de las claves públicas como bytes
         X_w_pub_key_xValue = X_w_pub_key_dict.get("x")
         X_w_pub_key_yValue = X_w_pub_key_dict.get("y")
@@ -244,14 +242,16 @@ def handle_gateway_registration(client_socket):
         Y_w_pub_key_xValue = Y_w_pub_key.x
         Y_w_pub_key_yValue = Y_w_pub_key.y
         Y_w_pub_key_dict = {"x": Y_w_pub_key_xValue, "y": Y_w_pub_key_yValue}
-        
+
         h_w = Hash_MAPFS(
-            [X_w_pub_key_xValue,
-            X_w_pub_key_yValue,
-            Pub_gc_key_xValue,
-            Pub_gc_key_yValue,
-            Y_w_pub_key_xValue,
-            Y_w_pub_key_yValue,]
+            [
+                X_w_pub_key_xValue,
+                X_w_pub_key_yValue,
+                Pub_gc_key_xValue,
+                Pub_gc_key_yValue,
+                Y_w_pub_key_xValue,
+                Y_w_pub_key_yValue,
+            ]
         )
         sigma_w = (s_gc_priv_key + h_w * y_w_priv_key) % P256.q
 
@@ -269,7 +269,12 @@ def handle_gateway_registration(client_socket):
         )
 
         # Enviar sigma_w, Y_w_pub_key y h_w al gateway
-        response = {"sigma_w": sigma_w, "Y_w_pub_key": Y_w_pub_key_dict, "h_w": h_w}
+        response = {
+            "operation": "register",
+            "sigma_w": sigma_w,
+            "Y_w_pub_key": Y_w_pub_key_dict,
+            "h_w": h_w,
+        }
         encoded_response = encode_message(response)
         client_socket.sendall(json.dumps(encoded_response).encode("utf-8"))
         logger.info("[REG Gateway] Respuesta enviada al gateway.")
@@ -333,9 +338,11 @@ def decode_message(encoded_message_dict):
             decoded_message[key] = value
     return decoded_message
 
+
 if __name__ == "__main__":
-    time.sleep(100)
+    time.sleep(5)
     # Inicia el servidor de métricas Prometheus
     logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8011.")
     start_http_server(8011, addr="0.0.0.0")
+    # Inicia el socket
     start_cloud_socket()

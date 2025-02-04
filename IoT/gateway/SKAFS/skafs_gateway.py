@@ -1,12 +1,3 @@
-import binascii
-import requests
-import logging
-import random
-import socket
-import json
-import base64
-import os
-
 from common.cripto_primitivas import *
 
 # Métricas
@@ -176,14 +167,16 @@ def handle_mutual_authentication(client_socket, message):
 
         # Paso 2: Generar r_1 y enviarlo al dispositivo IoT
         G_r_1 = int.from_bytes(os.urandom(8), "big")
-        payload = {"G_r_1": G_r_1}
+        payload = {"operation": "mutual_authentication", "G_r_1": G_r_1}
         client_socket.sendall(json.dumps(payload).encode("utf-8"))
         logger.info(f"[AUTH] r_1 generado y enviado al dispositivo IoT: {G_r_1}")
 
         # Paso 3: Recibir M_1, ID*, r_2*, K_i*, r_3* del dispositivo IoT
         IoT_M1 = json.loads(client_socket.recv(4096).decode("utf-8"))
         if not all(key in IoT_M1 for key in ["M_1", "ID*", "r_2*", "K_i*", "r_3*"]):
-            raise KeyError("[AUTH] Faltan argumentos en la respuesta del dispositivo IoT.")
+            raise KeyError(
+                "[AUTH] Faltan argumentos en la respuesta del dispositivo IoT."
+            )
         logger.info(f"[AUTH] Datos recibidos del IoT Device: {IoT_M1}")
 
         # Paso 4: Generar parámetros de autenticación y enviarlos a la CA
@@ -249,7 +242,7 @@ def handle_mutual_authentication(client_socket, message):
         G_K_current = returnData[4]
         G_r_3 = returnData[5]
 
-        payload = {"G_M_2": message}
+        payload = {"operation": "mutual_authentication", "G_M_2": message}
         client_socket.sendall(json.dumps(payload).encode("utf-8"))
         logger.info("[AUTH] Claves de sincronización enviadas al dispositivo IoT.")
 
@@ -268,7 +261,7 @@ def handle_mutual_authentication(client_socket, message):
         logger.info("[AUTH] Recibido IoT_K_i_next_obfuscated del dispositivo IoT.")
 
         # Paso 8: Enviar Epison_3_1 a la CA
-        payload = {"Epison_3_1": Epison_3_1}
+        payload = {"operation": "mutual_authentication", "Epison_3_1": Epison_3_1}
         ca_response = send_and_receive_persistent_socket(payload)
         logger.info(f"[AUTH] Epison_3_1 enviado a la CA.")
 
@@ -291,7 +284,11 @@ def handle_mutual_authentication(client_socket, message):
         K_s_int = int(str(K_s_int)[:16])
         K_s_bytes = K_s_int.to_bytes(AES.block_size, "big")
         session_keys[IoT_M1["ID*"]] = K_s_bytes
-        client_socket.sendall(json.dumps({"M_4": M_4}).encode("utf-8"))
+        client_socket.sendall(
+            json.dumps({"operation": "mutual_authentication", "M_4": M_4}).encode(
+                "utf-8"
+            )
+        )
         logger.info("[AUTH] Mensaje M_4 enviado al dispositivo IoT.")
         logger.info(f"[AUTH] Autenticación mutua culminada.")
 
@@ -301,6 +298,7 @@ def handle_mutual_authentication(client_socket, message):
         logger.error(f"Error inesperado durante la autenticación mutua: {e}")
     finally:
         client_socket.close()
+
 
 def generate_sigma1_sigma2_epison1(G_nonce, G_MK_G_CA, G_Sync_K_G_CA, G_r_1, IoT_M1):
     global gateway_identity
@@ -398,7 +396,9 @@ def checking_synchronization_bet_gateway_IoT(
             G_K_previous, G_r_1, G_r_3
         ), "El K anterior (K_p) no ha sido usado en la generación del mensaje de autenticación."
     else:
-        logger.error("No coinciden las llaves de sincronización anteriores ni actuales.")
+        logger.error(
+            "No coinciden las llaves de sincronización anteriores ni actuales."
+        )
 
     G_M_2 = Hash(G_K_a, Sync_IoT_G, G_r_1, G_r_3)
     registration_parameters["Sync_IoT_G"] = Sync_IoT_G
@@ -588,7 +588,13 @@ def handle_send_metrics(client_socket, message):
 
 
 if __name__ == "__main__":
+    time.sleep(10)
+    # Inicia el servidor de métricas Prometheus
     logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8010.")
     start_http_server(8010)
+
+    # Realiza el registro ante el CA
     gateway_registration()
+
+    # Inicia el socket
     start_gateway_socket()

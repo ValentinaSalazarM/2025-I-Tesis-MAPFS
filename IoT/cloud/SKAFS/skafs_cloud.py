@@ -1,12 +1,3 @@
-import binascii
-import requests
-import logging
-import socket
-import base64
-import json
-import os
-import threading
-
 from common.cripto_primitivas import *
 
 # Métricas
@@ -25,25 +16,25 @@ HOST = "0.0.0.0"
 PORT = 5001
 
 # Generación de la identidad y la clave a largo plazo
-CA_Identity = int.from_bytes(os.urandom(8), "big") 
-K = int.from_bytes(os.urandom(8), "big") 
+CA_Identity = int.from_bytes(os.urandom(8), "big")
+K = int.from_bytes(os.urandom(8), "big")
 
 # Generación de desafíos fija (C_F0, C_F1) simulando PUF
-C_F0 = int.from_bytes(os.urandom(8), "big") 
-C_F1 = int.from_bytes(os.urandom(8), "big") 
+C_F0 = int.from_bytes(os.urandom(8), "big")
+C_F1 = int.from_bytes(os.urandom(8), "big")
 
 # Lista global para almacenar los sensores registrados
 registered_devices = []
 
 # Diccionario para almacenar variables por IoT_Identity
-device_keys = {}  
+device_keys = {}
 IoT_Identity = None
 
 # Lista global para almacenar los gateways registrados
 registered_gateways = []
 
 # Diccionario para almacenar variables por Gateway_Identity
-gateway_keys = {}  
+gateway_keys = {}
 Gateway_Identity = None
 
 #######################################################
@@ -122,7 +113,7 @@ def handle_IoT_registration(client_socket, message):
         )
 
         # Enviar los desafíos al dispositivo
-        challenges = {"C_F0": C_F0, "C_F1": C_F1}
+        challenges = {"operation": "register_device", "C_F0": C_F0, "C_F1": C_F1}
         client_socket.sendall(json.dumps(encode_message(challenges)).encode("utf-8"))
 
         # Recibir datos del dispositivo IoT
@@ -165,8 +156,8 @@ def handle_IoT_registration(client_socket, message):
         IoT_T_j = K ^ FPUF_Fixed_F0 ^ FPUF_Fixed_F1
 
         # Generar variables CA_K específicas para este dispositivo
-        CA_K_before_previous = int.from_bytes(os.urandom(8), "big") 
-        CA_K_previous = int.from_bytes(os.urandom(8), "big") 
+        CA_K_before_previous = int.from_bytes(os.urandom(8), "big")
+        CA_K_previous = int.from_bytes(os.urandom(8), "big")
         CA_K_current = DPUF_C1  # Actualización con DPUF_C1 recibido
 
         # Registrar el dispositivo
@@ -183,7 +174,11 @@ def handle_IoT_registration(client_socket, message):
         )
 
         # Preparar y enviar la respuesta al dispositivo IoT
-        response = {"CA_K_previous": CA_K_previous, "IoT_T_j": IoT_T_j}
+        response = {
+            "operation": "register_device",
+            "CA_K_previous": CA_K_previous,
+            "IoT_T_j": IoT_T_j,
+        }
         encoded_response = encode_message(response)
         client_socket.sendall(json.dumps(encoded_response).encode("utf-8"))
         logger.info("[REG Dispositivo] Respuesta enviada al dispositivo IoT.")
@@ -218,13 +213,13 @@ def handle_gateway_registration(client_socket, message):
             raise KeyError("Falta Gateway_Identity en el mensaje recibido.")
 
         # Registrar el Gateway
-        
+
         Gateway_Identity = message.get("Gateway_Identity")
 
         # Generar parámetros específicos para el gateway
-        CA_MK_G_CA = int.from_bytes(os.urandom(8), "big") 
-        CA_Sync_K_G_CA_previous = int.from_bytes(os.urandom(8), "big") 
-        CA_r_1_previous = int.from_bytes(os.urandom(8), "big") 
+        CA_MK_G_CA = int.from_bytes(os.urandom(8), "big")
+        CA_Sync_K_G_CA_previous = int.from_bytes(os.urandom(8), "big")
+        CA_r_1_previous = int.from_bytes(os.urandom(8), "big")
         CA_Sync_K_G_CA = Hash(CA_Sync_K_G_CA_previous, CA_r_1_previous)
 
         # Registrar el gateway
@@ -242,12 +237,13 @@ def handle_gateway_registration(client_socket, message):
         )
 
         response = {
+            "operation": "register_gateway",
             "CA_Identity": CA_Identity,
             "CA_MK_G_CA": CA_MK_G_CA,
             "CA_Sync_K_G_CA_previous": CA_Sync_K_G_CA_previous,
             "CA_r_1_previous": CA_r_1_previous,
         }
-        
+
         # Codificar y enviar respuesta al Gateway
         encoded_response = encode_message(response)
         client_socket.sendall(json.dumps(encoded_response).encode("utf-8"))
@@ -276,9 +272,9 @@ def gateway_registration(message):
     Gateway_Identity = message.get("Gateway_Identity")
 
     # Generar parámetros específicos para el gateway
-    CA_MK_G_CA = int.from_bytes(os.urandom(8), "big") 
-    CA_Sync_K_G_CA_previous = int.from_bytes(os.urandom(8), "big") 
-    CA_r_1_previous = int.from_bytes(os.urandom(8), "big") 
+    CA_MK_G_CA = int.from_bytes(os.urandom(8), "big")
+    CA_Sync_K_G_CA_previous = int.from_bytes(os.urandom(8), "big")
+    CA_r_1_previous = int.from_bytes(os.urandom(8), "big")
     CA_Sync_K_G_CA = Hash(CA_Sync_K_G_CA_previous, CA_r_1_previous)
 
     # Registrar el gateway
@@ -308,6 +304,7 @@ def gateway_registration(message):
 #                 AUTENTICACIÓN MUTUA                 #
 #######################################################
 
+
 def handle_mutual_authentication(gateway_socket, decoded_message):
     """
     Autenticación mutua del Gateway con la CA.
@@ -323,6 +320,7 @@ def handle_mutual_authentication(gateway_socket, decoded_message):
 
         # Paso 2: Enviar el mensaje (CA_sigma_3, Epison_2_1, ..., D_sync_CA_G) al Gateway
         response_payload = {
+            "operation": "mutual_authentication",
             "CA_sigma_3": message[0],
             "Epison_2_1": message[1],
             "Epison_2_2": message[2],
@@ -361,7 +359,9 @@ def handle_mutual_authentication(gateway_socket, decoded_message):
         logger.info("[AUTH] Claves de sincronización actualizadas correctamente.")
 
         # Paso 4: Enviar M_3 al Gateway
-        encoded_message = encode_message({"M_3": M_3})
+        encoded_message = encode_message(
+            {"operation": "mutual_authentication", "M_3": M_3}
+        )
         gateway_socket.sendall(json.dumps(encoded_message).encode("utf-8"))
         logger.info("[AUTH] Mensaje M_3 enviado al Gateway.")
         logger.info("[AUTH] Autenticación mutua culminada.")
@@ -371,6 +371,7 @@ def handle_mutual_authentication(gateway_socket, decoded_message):
         logger.error(f"Error durante la autenticación mutua: {e}")
     finally:
         gateway_socket.close()
+
 
 def retrieve_R_2_ID(data):
     G_nonce = data["G_nonce"]
@@ -452,6 +453,7 @@ def retrieve_R_2_ID(data):
         iv,
     )
 
+
 def updating_synchronization_keys(
     Gateway_Identity,
     Epison_3_1,
@@ -532,18 +534,9 @@ def decode_message(encoded_message_dict):
 
 
 if __name__ == "__main__":
+    time.sleep(10)
     # Inicia el servidor de métricas Prometheus
     logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8011.")
     start_http_server(8011, addr="0.0.0.0")
-
-    # Crear hilos para la API y el servidor de sockets
-    # api_thread = threading.Thread(target=startApiServer)
-    socket_thread = threading.Thread(target=start_cloud_socket)
-
-    # Iniciar ambos hilos
-    # api_thread.start()
-    socket_thread.start()
-
-    # Esperar a que los hilos terminen
-    # api_thread.join()
-    socket_thread.join()
+    # Inicia el socket
+    start_cloud_socket()

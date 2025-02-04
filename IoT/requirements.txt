@@ -1,7 +1,3 @@
-fastapi
-pydantic
-uvicorn
-requests
 ecdsa
 fastecdsa
 pycryptodome
