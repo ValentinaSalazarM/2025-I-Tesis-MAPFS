@@ -87,7 +87,7 @@ def analyze_pcap(pcap_file):
                     # Almacenar en estructuras
                     leng = len(analysis["comms"]) > 0
                     logger.info(f"entry = {entry} y leng = {leng}")
-                    if not len(analysis["comms"]) > 0:
+                    if len(analysis["comms"]) == 0:
                         temp = analysis["ip_role_mapping"]
                         logger.info(f"ip_role_mapping = {temp}")
 

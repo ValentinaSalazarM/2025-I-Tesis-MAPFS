@@ -168,7 +168,6 @@ def mutual_authentication():
 
         first_request = {
             "operation": "mutual_authentication",
-            "h_a": registration_parameters.get("h_a"),
             "step": "hello",
             "one_time_public_key": A_dict,
         }
@@ -198,6 +197,9 @@ def mutual_authentication():
             "s_1": generated_data[6],
             "s_2": generated_data[7],
         }
+        registration_parameters["P_1"] = generated_data[0]
+        registration_parameters["P_3"] = generated_data[2]
+
         # Paso 3: Enviar P_1_dict, P_2_dict, P_3_dict, sigma_t, T_1_dict, T_2_dict, s_1, s_2
         logger.info(
             f"[AUTH] Puntos, compromisos y respuestas ZKP enviadas al gateway: {second_request}"
@@ -366,7 +368,8 @@ def message_authetication():
             # Construir el mensaje para enviar al Gateway
             payload = {
                 "operation": "send_metrics",
-                "h_a": registration_parameters.get("h_a"),
+                "P_1": registration_parameters.get("P_1"),
+                "P_3": registration_parameters.get("P_3"),
                 "iv": base64.b64encode(iv).decode("utf-8"),
                 "encrypted_metrics": base64.b64encode(encrypted_metrics).decode(
                     "utf-8"

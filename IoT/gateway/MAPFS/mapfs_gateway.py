@@ -345,7 +345,7 @@ def IoT_Authentication(iot_auth_token, hello_data, W_dict, rng_5):
     K_s_int = int(str(K_s_int)[:16])
     logger.info(f"[AUTH] La llave de sesión en el gateway es: {K_s_int}")
     K_s_bytes = K_s_int.to_bytes(AES.block_size, "big")
-    session_keys[hello_data.get("h_a")] = K_s_bytes
+    session_keys[(P_1_dict,P_3_dict)] = K_s_bytes
 
 #######################################################
 #                      AUXILIARES                     #
@@ -442,20 +442,22 @@ def handle_send_metrics(client_socket, message):
     """
     try:
         # Extraer los campos necesarios del mensaje
-        ID_obfuscated = message.get("h_a")
+        P_1 = message.get("P_1")
+        P_3 = message.get("P_3")
+        identifier = (P_1, P_3)
         iv_base64 = message.get("iv")
         encrypted_metrics_base64 = message.get("encrypted_metrics")
 
-        if not ID_obfuscated or not iv_base64 or not encrypted_metrics_base64:
+        if not identifier or not iv_base64 or not encrypted_metrics_base64:
             raise ValueError(
                 "Faltan campos en el mensaje recibido ('h_a', 'iv' o 'encrypted_metrics')."
             )
 
         # Buscar la llave de sesión correspondiente
-        K_s_bytes = session_keys.get(ID_obfuscated)
+        K_s_bytes = session_keys.get(identifier)
         if not K_s_bytes:
             raise ValueError(
-                f"No se encontró una llave de sesión para h_a={ID_obfuscated}."
+                f"No se encontró una llave de sesión para <P_1, P_3>={identifier}."
             )
 
         # Decodificar IV y las métricas cifradas desde Base64
