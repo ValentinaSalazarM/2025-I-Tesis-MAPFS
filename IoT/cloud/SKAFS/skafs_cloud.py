@@ -23,19 +23,15 @@ K = int.from_bytes(os.urandom(8), "big")
 C_F0 = int.from_bytes(os.urandom(8), "big")
 C_F1 = int.from_bytes(os.urandom(8), "big")
 
-# Lista global para almacenar los sensores registrados
-registered_devices = []
-
 # Diccionario para almacenar variables por IoT_Identity
-device_keys = {}
-IoT_Identity = None
-
-# Lista global para almacenar los gateways registrados
-registered_gateways = []
+registered_devices = {}
 
 # Diccionario para almacenar variables por Gateway_Identity
-gateway_keys = {}
-Gateway_Identity = None
+registered_gateways = {}
+
+# Dispositivo y Gateway que se están autenticando actualmente
+current_gateway_identity = None
+current_iot_identity = None
 
 #######################################################
 #                 INICIAR SERVIDORES                  #
@@ -48,7 +44,7 @@ def start_cloud_socket():
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
         server_socket.bind((HOST, PORT))
-        server_socket.listen(5)
+        server_socket.listen()
         logger.info(f"Servidor Cloud escuchando en {HOST}:{PORT}")
 
         while True:
@@ -105,9 +101,11 @@ def handle_IoT_registration(client_socket, message):
     """
     Manejar el registro del dispositivo IoT.
     """
-    global registered_devices, device_keys, IoT_Identity
+    global registered_devices
 
     try:
+        client_ip, client_port = client_socket.getpeername()
+
         logger.info(
             "[REG Dispositivo] Enviando desafíos C_F0 y C_F1 al dispositivo IoT."
         )
@@ -131,25 +129,25 @@ def handle_IoT_registration(client_socket, message):
         )
 
         # Validar los datos recibidos
-        IoT_Identity = message.get("IoT_Identity")
+        iot_identity = message.get("iot_identity")
         DPUF_C1 = message.get("DPUF_C1")
         FPUF_Fixed_F0 = message.get("FPUF_Fixed_F0")
         FPUF_Fixed_F1 = message.get("FPUF_Fixed_F1")
 
-        if None in (IoT_Identity, DPUF_C1, FPUF_Fixed_F0, FPUF_Fixed_F1):
+        if None in (iot_identity, DPUF_C1, FPUF_Fixed_F0, FPUF_Fixed_F1):
             raise KeyError(
                 "Faltan datos en el mensaje recibido para el registro del dispositivo IoT."
             )
 
         # Verificar si el dispositivo ya está registrado
-        if IoT_Identity in registered_devices:
+        if iot_identity in registered_devices:
             logger.warning(
-                f"[REG Dispositivo] El dispositivo con ID {IoT_Identity} ya está registrado."
+                f"[REG Dispositivo] El dispositivo con ID {iot_identity} ya está registrado."
             )
             raise ValueError("El dispositivo ya está registrado.")
 
         logger.info(
-            f"[REG Dispositivo] Recibidos datos del dispositivo IoT: IoT_Identity={IoT_Identity}, DPUF_C1={DPUF_C1}, FPUF_Fixed_F0={FPUF_Fixed_F0}, FPUF_Fixed_F1={FPUF_Fixed_F1}"
+            f"[REG Dispositivo] Recibidos datos del dispositivo IoT: iot_identity={iot_identity}, DPUF_C1={DPUF_C1}, FPUF_Fixed_F0={FPUF_Fixed_F0}, FPUF_Fixed_F1={FPUF_Fixed_F1}"
         )
 
         # Cálculo de IoT_T_j
@@ -161,21 +159,24 @@ def handle_IoT_registration(client_socket, message):
         CA_K_current = DPUF_C1  # Actualización con DPUF_C1 recibido
 
         # Registrar el dispositivo
-        registered_devices.append(IoT_Identity)
-        device_keys[IoT_Identity] = {
+
+        device_keys = {
+            "IP": client_ip,
             "IoT_T_j": IoT_T_j,
             "CA_K_before_previous": CA_K_before_previous,
             "CA_K_previous": CA_K_previous,
             "CA_K_current": CA_K_current,
         }
 
+        registered_devices[iot_identity] = device_keys
+
         logger.info(
-            f"[REG Dispositivo] Dispositivo IoT con ID {IoT_Identity} registrado exitosamente. Claves asociadas: {device_keys[IoT_Identity]}"
+            f"[REG Dispositivo] Dispositivo IoT con ID {iot_identity} registrado exitosamente. Claves asociadas: {device_keys}"
         )
 
         # Preparar y enviar la respuesta al dispositivo IoT
         response = {
-            "operation": "register_device",
+            "operation": "register",
             "CA_K_previous": CA_K_previous,
             "IoT_T_j": IoT_T_j,
         }
@@ -185,17 +186,19 @@ def handle_IoT_registration(client_socket, message):
 
     except KeyError as e:
         logger.error(f"Clave faltante en los datos del dispositivo IoT: {e}")
+        response = {"status": "error", "message": str(e)}
+        client_socket.sendall(json.dumps(response).encode("utf-8"))
     except ValueError as e:
         logger.error(f"Error en el registro del dispositivo IoT: {e}")
-        client_socket.sendall(
-            json.dumps(encode_message({"error": str(e)})).encode("utf-8")
-        )
+        response = {"status": "error", "message": str(e)}
+        client_socket.sendall(json.dumps(response).encode("utf-8"))
     except Exception as e:
         logger.error(f"Error inesperado durante el registro del dispositivo IoT: {e}")
+        response = {"status": "error", "message": str(e)}
+        client_socket.sendall(json.dumps(response).encode("utf-8"))
     finally:
         client_socket.close()
         logger.info("[REG Dispositivo] Conexión con el dispositivo IoT cerrada.")
-
 
 #######################################################
 #                   REGISTRO GATEWAY                  #
@@ -206,15 +209,15 @@ def handle_gateway_registration(client_socket, message):
     """
     Manejar el registro del Gateway.
     """
-    global registered_gateways, gateway_keys, Gateway_Identity
+    global registered_gateways
     try:
-        Gateway_Identity = message.get("Gateway_Identity")
-        if not Gateway_Identity:
-            raise KeyError("Falta Gateway_Identity en el mensaje recibido.")
+        client_ip, client_port = client_socket.getpeername()
 
-        # Registrar el Gateway
+        gateway_identity = message.get("gateway_identity")
+        if not gateway_identity:
+            raise KeyError("Falta gateway_identity en el mensaje recibido.")
 
-        Gateway_Identity = message.get("Gateway_Identity")
+        gateway_identity = message.get("gateway_identity")
 
         # Generar parámetros específicos para el gateway
         CA_MK_G_CA = int.from_bytes(os.urandom(8), "big")
@@ -222,22 +225,31 @@ def handle_gateway_registration(client_socket, message):
         CA_r_1_previous = int.from_bytes(os.urandom(8), "big")
         CA_Sync_K_G_CA = Hash(CA_Sync_K_G_CA_previous, CA_r_1_previous)
 
-        # Registrar el gateway
-        registered_gateways.append(Gateway_Identity)
+        # Verificar si el gateway ya está registrado
+        if gateway_identity in registered_gateways:
+            logger.warning(
+                f"[REG Gateway] El gateway con ID {gateway_identity} ya se encuentra registrado."
+            )
+            raise ValueError("El gateway ya se encuentra registrado.")
 
-        gateway_keys[Gateway_Identity] = {
+        # Registrar el gateway
+        gateway_keys = {
+            "IP": client_ip,
             "CA_MK_G_CA": CA_MK_G_CA,
             "CA_Sync_K_G_CA_previous": CA_Sync_K_G_CA_previous,
             "CA_r_1_previous": CA_r_1_previous,
             "CA_Sync_K_G_CA": CA_Sync_K_G_CA,
         }
 
+        registered_gateways[gateway_identity] = gateway_keys
+
         logger.info(
-            f"[REG Gateway] Gateway con ID {Gateway_Identity} registrado exitosamente. Claves asociadas: {gateway_keys[Gateway_Identity]}"
+            f"[REG Gateway] Gateway con ID {gateway_identity} registrado exitosamente. Claves asociadas: {gateway_keys}"
         )
 
+        # Preparar y enviar la respuesta al Gateway
         response = {
-            "operation": "register_gateway",
+            "operation": "register",
             "CA_Identity": CA_Identity,
             "CA_MK_G_CA": CA_MK_G_CA,
             "CA_Sync_K_G_CA_previous": CA_Sync_K_G_CA_previous,
@@ -247,57 +259,23 @@ def handle_gateway_registration(client_socket, message):
         # Codificar y enviar respuesta al Gateway
         encoded_response = encode_message(response)
         client_socket.sendall(json.dumps(encoded_response).encode("utf-8"))
-        logger.info(f"Gateway registrado con éxito: {Gateway_Identity}")
+        logger.info(f"Gateway registrado con éxito: {gateway_identity}")
 
     except KeyError as e:
-        logger.error(f"Clave faltante en los datos del gateway: {e}")
+        logger.error(f"Clave faltante en los datos del Gateway: {e}")
+        response = {"status": "error", "message": str(e)}
+        client_socket.sendall(json.dumps(response).encode("utf-8"))
     except ValueError as e:
-        logger.error(f"Error en el registro del gateway: {e}")
-        client_socket.sendall(
-            json.dumps(encode_message({"error": str(e)})).encode("utf-8")
-        )
+        logger.error(f"Error en el registro del Gateway: {e}")
+        response = {"status": "error", "message": str(e)}
+        client_socket.sendall(json.dumps(response).encode("utf-8"))
     except Exception as e:
-        logger.error(f"Error inesperado durante el registro del gateway: {e}")
+        logger.error(f"Error inesperado durante el registro del Gateway: {e}")
+        response = {"status": "error", "message": str(e)}
+        client_socket.sendall(json.dumps(response).encode("utf-8"))
     finally:
         client_socket.close()
-        logger.info("[REG Gateway] Conexión con el gateway cerrada.")
-
-
-def gateway_registration(message):
-    """
-    Registrar el gateway y devolver los parámetros necesarios.
-    """
-    global registered_gateways, gateway_keys, Gateway_Identity
-
-    Gateway_Identity = message.get("Gateway_Identity")
-
-    # Generar parámetros específicos para el gateway
-    CA_MK_G_CA = int.from_bytes(os.urandom(8), "big")
-    CA_Sync_K_G_CA_previous = int.from_bytes(os.urandom(8), "big")
-    CA_r_1_previous = int.from_bytes(os.urandom(8), "big")
-    CA_Sync_K_G_CA = Hash(CA_Sync_K_G_CA_previous, CA_r_1_previous)
-
-    # Registrar el gateway
-    registered_gateways.append(Gateway_Identity)
-
-    gateway_keys[Gateway_Identity] = {
-        "CA_MK_G_CA": CA_MK_G_CA,
-        "CA_Sync_K_G_CA_previous": CA_Sync_K_G_CA_previous,
-        "CA_r_1_previous": CA_r_1_previous,
-        "CA_Sync_K_G_CA": CA_Sync_K_G_CA,
-    }
-
-    logger.info(
-        f"[REG Gateway] Gateway con ID {Gateway_Identity} registrado exitosamente. Claves asociadas: {gateway_keys[Gateway_Identity]}"
-    )
-
-    # Retornar los parámetros al gateway
-    return {
-        "CA_Identity": CA_Identity,
-        "CA_MK_G_CA": CA_MK_G_CA,
-        "CA_Sync_K_G_CA_previous": CA_Sync_K_G_CA_previous,
-        "CA_r_1_previous": CA_r_1_previous,
-    }
+        logger.info("[REG Gateway] Conexión con el Gateway cerrada.")
 
 
 #######################################################
@@ -309,9 +287,33 @@ def handle_mutual_authentication(gateway_socket, decoded_message):
     """
     Autenticación mutua del Gateway con la CA.
     """
+    global registered_gateways, registered_devices, current_gateway_identity, current_iot_identity
     try:
+        socket_gateway_ip, socket_port = gateway_socket.getpeername()
+        socket_device_ip = decoded_message.get("device_ip")
+
+        # Encontrar el disposititivo y el Gateway que se están autenticando
+        current_gateway_identity = None
+        for gateway_identity, gateway_data in registered_gateways.items():
+            if gateway_data.get("IP") == socket_gateway_ip:
+                current_gateway_identity = gateway_identity
+
+        current_iot_identity = None
+        for iot_identity, device_data in registered_devices.items():
+            if device_data.get("IP") == socket_device_ip:
+                current_iot_identity = iot_identity
+
+        if not current_iot_identity or not current_gateway_identity:
+            logger.error("[AUTH] No hay sesión activa. Autenticación requerida.")
+            raise PermissionError(
+                "El Gateway no está autenticado con el CA, se restringe el acceso."
+            )
+
+        logger.info(
+            f"Actualmente se está autenticando el Gateway {current_gateway_identity} y el Device {current_iot_identity}"
+        )
+
         # Paso 1: Recibir datos del Gateway
-        logger.info(f"[AUTH] Recepción de datos del Gateway")
         ReturnData = retrieve_R_2_ID(decoded_message)
         message = ReturnData[:6]
         HashResult = ReturnData[6]
@@ -342,12 +344,12 @@ def handle_mutual_authentication(gateway_socket, decoded_message):
         logger.info("[AUTH] Recibido Epison_3_1 del Gateway.")
 
         # Actualizar las claves de sincronización
-        CA_K_previous = device_keys[IoT_Identity]["CA_K_previous"]
-        CA_K_current = device_keys[IoT_Identity]["CA_K_current"]
-        CA_Sync_K_G_CA = gateway_keys[Gateway_Identity]["CA_Sync_K_G_CA"]
+        CA_K_previous = registered_devices[current_iot_identity]["CA_K_previous"]
+        CA_K_current = registered_devices[current_iot_identity]["CA_K_current"]
+
+        CA_Sync_K_G_CA = registered_gateways[current_gateway_identity]["CA_Sync_K_G_CA"]
 
         M_3 = updating_synchronization_keys(
-            Gateway_Identity,
             Epison_3_1,
             HashResult,
             iv,
@@ -365,29 +367,45 @@ def handle_mutual_authentication(gateway_socket, decoded_message):
         gateway_socket.sendall(json.dumps(encoded_message).encode("utf-8"))
         logger.info("[AUTH] Mensaje M_3 enviado al Gateway.")
         logger.info("[AUTH] Autenticación mutua culminada.")
+        
+        current_gateway_identity = None
+        current_iot_identity = None
+    except PermissionError as e:
+        logger.error(f"Error de autenticación: {e}")
+        response = {"status": "failed", "message": str(e)}
+        gateway_socket.sendall(json.dumps(response).encode("utf-8"))
     except KeyError as e:
         logger.error(f"Clave faltante en los datos recibidos: {e}")
+        response = {"status": "error", "message": str(e)}
+        gateway_socket.sendall(json.dumps(response).encode("utf-8"))
     except Exception as e:
         logger.error(f"Error durante la autenticación mutua: {e}")
+        response = {"status": "error", "message": str(e)}
+        gateway_socket.sendall(json.dumps(response).encode("utf-8"))
     finally:
         gateway_socket.close()
+        logger.info("[AUTH] Conexión con el Gateway cerrada.")
 
 
 def retrieve_R_2_ID(data):
-    G_nonce = data["G_nonce"]
-    G_sigma_1 = data["G_sigma_1"]
-    G_sigma_2 = data["G_sigma_2"]
-    Epison_1_1 = data["Epison_1_1"]
-    Epison_1_2 = data["Epison_1_2"]
-    Epison_1_3 = data["Epison_1_3"]
-    Epison_1_4 = data["Epison_1_4"]
-    Epison_1_5 = data["Epison_1_5"]
-    iv = data["iv"]
+    global registered_gateways, registered_devices, current_gateway_identity, current_iot_identity
+    G_nonce = data.get("G_nonce")
+    G_sigma_1 = data.get("G_sigma_1")
+    G_sigma_2 = data.get("G_sigma_2")
+    Epison_1_1 = data.get("Epison_1_1")
+    Epison_1_2 = data.get("Epison_1_2")
+    Epison_1_3 = data.get("Epison_1_3")
+    Epison_1_4 = data.get("Epison_1_4")
+    Epison_1_5 = data.get("Epison_1_5")
+    iv = data.get("iv")
 
     # Datos del registro del gateway
-    CA_MK_G_CA = gateway_keys[Gateway_Identity]["CA_MK_G_CA"]
-    CA_Sync_K_G_CA_previous = gateway_keys[Gateway_Identity]["CA_Sync_K_G_CA_previous"]
-    CA_Sync_K_G_CA = gateway_keys[Gateway_Identity]["CA_Sync_K_G_CA"]
+
+    CA_MK_G_CA = registered_gateways[current_gateway_identity]["CA_MK_G_CA"]
+    CA_Sync_K_G_CA_previous = registered_gateways[current_gateway_identity][
+        "CA_Sync_K_G_CA_previous"
+    ]
+    CA_Sync_K_G_CA = registered_gateways[current_gateway_identity]["CA_Sync_K_G_CA"]
 
     h1 = hashlib.new("sha256")
     h1.update(CA_Sync_K_G_CA.to_bytes(32, "big"))
@@ -409,12 +427,12 @@ def retrieve_R_2_ID(data):
     IoT_K_i_Decrypted = int.from_bytes(DEC.decrypt(Epison_1_5), "big")
 
     assert G_sigma_1 == Hash(
-        CA_MK_G_CA, Gateway_Identity, G_nonce
+        CA_MK_G_CA, current_gateway_identity, G_nonce
     ), "The authentication of the Gateway by the CA has failed"
 
-    if G_sigma_2 == Hash(CA_Sync_K_G_CA_previous, Gateway_Identity, G_nonce):
+    if G_sigma_2 == Hash(CA_Sync_K_G_CA_previous, current_gateway_identity, G_nonce):
         D_sync_CA_G = 1  # it was -1
-    elif G_sigma_2 == Hash(CA_Sync_K_G_CA, Gateway_Identity, G_nonce):
+    elif G_sigma_2 == Hash(CA_Sync_K_G_CA, current_gateway_identity, G_nonce):
         D_sync_CA_G = 0
     CA_r_2_retrieved = IoT_r_2_Decrypted ^ K
 
@@ -422,12 +440,14 @@ def retrieve_R_2_ID(data):
     CA_sigma_3 = Hash(CA_MK_G_CA, CA_Identity, D_sync_CA_G, G_nonce + 1)
 
     # Datos del registro del IoT
-    CA_K_before_previous = device_keys[IoT_Identity]["CA_K_before_previous"]
-    CA_K_previous = device_keys[IoT_Identity]["CA_K_previous"]
-    CA_K_current = device_keys[IoT_Identity]["CA_K_current"]
+    CA_K_before_previous = registered_devices[current_iot_identity][
+        "CA_K_before_previous"
+    ]
+    CA_K_previous = registered_devices[current_iot_identity]["CA_K_previous"]
+    CA_K_current = registered_devices[current_iot_identity]["CA_K_current"]
 
     # Datos del registro del Gateway
-    CA_r_1_previous = gateway_keys[Gateway_Identity]["CA_r_1_previous"]
+    CA_r_1_previous = registered_gateways[current_gateway_identity]["CA_r_1_previous"]
 
     ENC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
     Epison_2_1 = ENC.encrypt(CA_K_before_previous.to_bytes(32, "big"))
@@ -455,7 +475,6 @@ def retrieve_R_2_ID(data):
 
 
 def updating_synchronization_keys(
-    Gateway_Identity,
     Epison_3_1,
     HashResult,
     iv,
@@ -464,26 +483,30 @@ def updating_synchronization_keys(
     CA_K_current,
     CA_Sync_K_G_CA,
 ):
-
+    global registered_gateways, registered_devices
     DEC = AES.new(HashResult[:16], AES.MODE_CBC, iv)
     CA_IoT_K_i_next = int.from_bytes(DEC.decrypt(Epison_3_1), "big")
 
-    ##### Update the IoT synchronization keys ##############
+    # Actualizar llaves de sincronización del dispositivo
 
-    device_keys[IoT_Identity]["CA_K_before_previous"] = CA_K_previous
-    device_keys[IoT_Identity]["CA_K_previous"] = CA_K_current
-    device_keys[IoT_Identity]["CA_K_current"] = CA_IoT_K_i_next
-    gateway_keys[Gateway_Identity]["CA_r_1_previous"] = G_r_1_Decrypted
+    registered_devices[current_iot_identity]["CA_K_before_previous"] = CA_K_previous
+    registered_devices[current_iot_identity]["CA_K_previous"] = CA_K_current
+    registered_devices[current_iot_identity]["CA_K_current"] = CA_IoT_K_i_next
+    registered_gateways[current_gateway_identity]["CA_r_1_previous"] = G_r_1_Decrypted
 
-    CA_K_before_previous = device_keys[IoT_Identity]["CA_K_before_previous"]
-    CA_K_previous = device_keys[IoT_Identity]["CA_K_previous"]
-    CA_K_current = device_keys[IoT_Identity]["CA_K_current"]
+    CA_K_before_previous = registered_devices[current_iot_identity][
+        "CA_K_before_previous"
+    ]
+    CA_K_previous = registered_devices[current_iot_identity]["CA_K_previous"]
+    CA_K_current = registered_devices[current_iot_identity]["CA_K_current"]
 
-    ##### Update the gateway & CA synchronization keys ###########
+    # Actualizar llaves de sincronización del gateway y el CA
     CA_Sync_K_G_CA_previous = CA_Sync_K_G_CA
     CA_Sync_K_G_CA = Hash(CA_Sync_K_G_CA, G_r_1_Decrypted)
     M_3 = Hash(CA_K_before_previous, CA_K_previous, CA_K_current, CA_Sync_K_G_CA)
-    gateway_keys[Gateway_Identity]["CA_Sync_K_G_CA_previous"] = CA_Sync_K_G_CA_previous
+    registered_gateways[current_gateway_identity][
+        "CA_Sync_K_G_CA_previous"
+    ] = CA_Sync_K_G_CA_previous
     return M_3
 
 
@@ -534,7 +557,7 @@ def decode_message(encoded_message_dict):
 
 
 if __name__ == "__main__":
-    time.sleep(10)
+    time.sleep(5)
     # Inicia el servidor de métricas Prometheus
     logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8011.")
     start_http_server(8011, addr="0.0.0.0")

@@ -26,15 +26,15 @@ C_F1 = None
 
 # Parámetros de registro
 registration_parameters = {}
-iot_identity = int.from_bytes(os.urandom(8), "big") 
+iot_identity = int.from_bytes(os.urandom(8), "big")
 
-# Llaves de sesión con Gateways
-K_s_bytes = None
-
+# Parámetros de autenticación con el Gateway
+authentication_parameters = {}
 
 #######################################################
 #              REGISTRO DISPOSITIVO IOT               #
 #######################################################
+
 
 def IoT_registration():
     """
@@ -49,11 +49,11 @@ def IoT_registration():
             logger.info(f"[REG] Conectado al CA en {CA_HOST}:{CA_PORT}")
 
             # Generación de DPUF challenge y estado
-            C_1 = int.from_bytes(os.urandom(8), "big") 
-            state = int.from_bytes(os.urandom(8), "big") 
+            C_1 = int.from_bytes(os.urandom(8), "big")
+            state = int.from_bytes(os.urandom(8), "big")
 
             # Generación de la identidad del IoT
-            logger.info(f"[REG] IoT_Identity generado: {iot_identity}")
+            logger.info(f"[REG] iot_identity generado: {iot_identity}")
 
             # Paso 1: Solicitar desafíos al CA
             first_payload = {"operation": "register_device"}
@@ -69,7 +69,9 @@ def IoT_registration():
             C_F0 = challenges.get("C_F0")
             C_F1 = challenges.get("C_F1")
             if C_F0 is None or C_F1 is None:
-                raise KeyError("[REG] Faltan desafíos C_F0 o C_F1 en la respuesta del CA.")
+                raise KeyError(
+                    "[REG] Faltan desafíos C_F0 o C_F1 en la respuesta del CA."
+                )
             logger.info("[REG] Desafíos recibidos del CA.")
 
             # Cálculo de las funciones FPUF y DPUF
@@ -80,7 +82,7 @@ def IoT_registration():
             # Paso 2: Enviar datos calculados al CA
             second_payload = {
                 "operation": "register_device",
-                "IoT_Identity": iot_identity,
+                "iot_identity": iot_identity,
                 "DPUF_C1": DPUF_C1,
                 "FPUF_Fixed_F0": FPUF_Fixed_F0,
                 "FPUF_Fixed_F1": FPUF_Fixed_F1,
@@ -126,13 +128,14 @@ def IoT_registration():
 #                 AUTENTICACIÓN MUTUA                 #
 #######################################################
 
+
 def mutual_authentication():
     """
     Protocolo de autenticación mutua para el dispositivo IoT.
     Este proceso asegura la autenticidad y sincronización de claves entre el dispositivo IoT y el Gateway.
     """
 
-    global registration_parameters
+    global registration_parameters, authentication_parameters
 
     try:
         # Inicializar el socket persistente
@@ -165,8 +168,14 @@ def mutual_authentication():
             "K_i*": message[3],
             "r_3*": message[4],
         }
+        authentication_parameters["ID*"] = message[1]
         response = send_and_receive_persistent_socket(payload)
         logger.info("[AUTH] Mensaje cifrado enviado al Gateway.")
+
+        if response.get("status") == "failed" or response.get("status") == "error":
+            raise PermissionError(
+                "El proceso de autenticación ha sido detenido por el Gateway o por el CA."
+            )
 
         # Paso 4: Recibir claves y sincronización G_M_2, Sync_IoT_G del Gateway
         message, IoT_K_s, state, IoT_C_1 = compute_next_session_key(
@@ -182,6 +191,10 @@ def mutual_authentication():
         payload = {"operation": "mutual_authentication", "K_i_next_obfuscated": message}
         response = send_and_receive_persistent_socket(payload)
         logger.info("[AUTH] Claves obfuscadas enviadas al Gateway.")
+        if response.get("status") == "failed" or response.get("status") == "error":
+            raise PermissionError(
+                "El proceso de autenticación ha sido detenido por el Gateway o por el CA."
+            )
 
         # Paso 6: Recibir mensaje M_4 del Gateway y actualizar parámetros
         if not all(key in response for key in ["M_4"]):
@@ -207,6 +220,8 @@ def mutual_authentication():
         )
         logger.info("[AUTH] Parámetros del dispositivo IoT actualizados correctamente.")
         logger.info("[AUTH] Autenticación mutua culminada.")
+    except PermissionError as e:
+        logger.error(f"[AUTH] Error de autenticación: {e}")
     except KeyError as e:
         logger.error(f"[AUTH] Error de datos faltantes en la respuesta: {e}")
     except socket.error as e:
@@ -216,10 +231,11 @@ def mutual_authentication():
     finally:
         close_socket()
 
+
 def IoT_obfuscation_for_R_2_ID(G_r_1):
-    global ID_obfuscated, iot_identity
-    r_2 = int.from_bytes(os.urandom(8), "big") 
-    r_3 = int.from_bytes(os.urandom(8), "big") 
+    global iot_identity, registration_parameters
+    r_2 = int.from_bytes(os.urandom(8), "big")
+    r_3 = int.from_bytes(os.urandom(8), "big")
 
     C_1 = registration_parameters["C_1"]
     state = registration_parameters["state"]
@@ -240,8 +256,9 @@ def IoT_obfuscation_for_R_2_ID(G_r_1):
         K_i,
     )
 
+
 def compute_next_session_key(data, G_r_1, r_3, K_i, C_1, state):
-    global K_s_bytes
+    global authentication_parameters
     # G_M_2, Sync_G
     G_M_2 = data[0]
     Sync_G = data[1]
@@ -254,13 +271,16 @@ def compute_next_session_key(data, G_r_1, r_3, K_i, C_1, state):
     K_i = DPUF(C_1, state)
     K_i_next = DPUF(Hash(C_1), Hash(state))
     K_i_next_obfuscated = K_i_next ^ K_i
-    
+
     K_s_int = Hash(G_r_1, r_3, K_i)
     K_s_int = int(str(K_s_int)[:16])
     K_s_bytes = K_s_int.to_bytes(AES.block_size, "big")
-    
+
+    # Almacenar los parámetros de autenticación
+    authentication_parameters = {"session_key": K_s_bytes}
     logger.info(f"[AUTH] La llave de sesión en el dispositivo IoT es: {K_s_int}")
     return K_i_next_obfuscated, K_s_int, state, C_1
+
 
 def updating_challenge_DPUF_configuration(
     M_4, K_s, G_r_1, r_3, K_previous, K_i, C_1, state
@@ -278,63 +298,91 @@ def updating_challenge_DPUF_configuration(
 #                 INTERCAMBIAR MENSAJES               #
 #######################################################
 
-def message_authetication():
+
+def send_encrypted_metrics():
     """
     Envía métricas cifradas al Gateway utilizando AES en modo CBC.
-
     """
+    global authentication_parameters
     try:
-        # Enviar el mensaje al Gateway mediante sockets
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            while True:
-                sensor_data = {
-                    "temperature": random.uniform(20.0, 30.0),
-                    "humidity": random.uniform(50, 70),
-                }
+        while True:
+            # Verificar que el dispositivo esté autenticado
+            if (
+                not authentication_parameters
+                or "session_key" not in authentication_parameters
+            ):
+                logger.error("[METRICS] No hay sesión activa. Autenticación requerida.")
+                raise ValueError("El dispositivo no está autenticado con el Gateway.")
 
-                # Serializar las métricas a JSON
-                metrics_json = json.dumps(sensor_data).encode("utf-8")
+            # Generar datos simulados del sensor
+            sensor_data = {
+                "temperature": round(random.uniform(20.0, 30.0), 2),
+                "humidity": round(random.uniform(50, 70), 2),
+            }
 
-                # Generar un IV aleatorio para CBC
-                iv = Random.new().read(AES.block_size)
+            # Serializar las métricas a JSON
+            metrics_json = json.dumps(sensor_data).encode("utf-8")
 
-                # Crear el cifrador AES en modo CBC
-                cipher = AES.new(K_s_bytes, AES.MODE_CBC, iv)
+            # Generar IV aleatorio para CBC
+            iv = Random.new().read(AES.block_size)
 
-                # Cifrar las métricas con padding
-                encrypted_metrics = cipher.encrypt(pad(metrics_json, AES.block_size))
+            # Obtener la clave de sesión
+            K_s_bytes = authentication_parameters["session_key"]
+            if not K_s_bytes:
+                raise ValueError("[METRICS] Clave de sesión no encontrada.")
 
-                # Construir el mensaje para enviar al Gateway
-                payload = {
-                    "operation": "send_metrics",
-                    "ID_obfuscated": ID_obfuscated,
-                    "iv": base64.b64encode(iv).decode("utf-8"),
-                    "encrypted_metrics": base64.b64encode(encrypted_metrics).decode(
-                        "utf-8"
-                    ),
-                }
-                sock.connect((GATEWAY_HOST, GATEWAY_PORT))
-                sock.sendall(json.dumps(payload).encode("utf-8"))
-                logger.info("[METRICS] Mensaje cifrado enviado al Gateway.")
+            # Cifrar las métricas con AES en modo CBC
+            cipher = AES.new(K_s_bytes, AES.MODE_CBC, iv)
+            encrypted_metrics = cipher.encrypt(pad(metrics_json, AES.block_size))
 
-                # Recibir respuesta del Gateway
-                response = sock.recv(4096)
-                if response:
-                    response_message = json.loads(response.decode("utf-8"))
+            # Construir el mensaje a enviar al Gateway
+            payload = {
+                "operation": "send_metrics",
+                "ID_obfuscated": authentication_parameters.get("ID*"),
+                "iv": base64.b64encode(iv).decode("utf-8"),
+                "encrypted_metrics": base64.b64encode(encrypted_metrics).decode(
+                    "utf-8"
+                ),
+            }
+
+            # Enviar el mensaje al Gateway mediante sockets
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                try:
+                    sock.connect((GATEWAY_HOST, GATEWAY_PORT))
+                    sock.sendall(json.dumps(payload).encode("utf-8"))
                     logger.info(
-                        f"[METRICS] Respuesta recibida del Gateway: {response_message}"
+                        f"[METRICS] Métricas cifradas enviadas al Gateway: {sensor_data}"
                     )
-                time.sleep(60)
-    except ValueError as e:
-        logger.error(f"[METRICS] Error de validación: {e}")
-    except socket.error as e:
-        logger.error(f"[METRICS] Error de comunicación por socket: {e}")
+
+                    # Recibir respuesta del Gateway
+                    response = sock.recv(4096)
+                    if response:
+                        response_message = json.loads(response.decode("utf-8"))
+                        logger.info(
+                            f"[METRICS] Respuesta recibida del Gateway: {response_message}"
+                        )
+
+                        # Si el dispositivo ha sido revocado, detener envío de métricas
+                        if response.get("status") == "failed" or response.get("status") == "error":
+                            raise PermissionError(
+                                "Dispositivo no autenticado o revocado por el Gateway. Deteniendo envío de métricas."
+                            )
+                except socket.error as e:
+                    logger.error(f"[METRICS] Error de comunicación con el Gateway: {e}")
+
+            # Esperar antes de enviar la siguiente métrica
+            time.sleep(60)
+
+    except PermissionError as e:
+        logger.error(f"[METRICS] Error de autenticación: {e}")
     except Exception as e:
-        logger.error(f"[METRICS] Error inesperado: {e}")
+        logger.error(f"[METRICS] Error inesperado en el envío de métricas: {e}")
+
 
 #######################################################
 #                      AUXILIARES                     #
 #######################################################
+
 
 def initialize_socket():
     """
@@ -351,6 +399,7 @@ def initialize_socket():
             gateway_socket = None
             raise e
 
+
 def close_socket():
     """
     Cierra el socket persistente.
@@ -364,6 +413,7 @@ def close_socket():
             logger.error(f"Error al cerrar el socket: {e}")
         finally:
             gateway_socket = None
+
 
 def send_and_receive_persistent_socket(message_dict):
     """
@@ -408,13 +458,14 @@ def send_and_receive_persistent_socket(message_dict):
         gateway_socket = None  # Marcar el socket como no válido
         raise e
 
+
 if __name__ == "__main__":
     time.sleep(15)
-     # Inicia el servidor de métricas Prometheus
+    # Inicia el servidor de métricas Prometheus
     logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8012.")
     start_http_server(8012)
     # Realiza el registro y la autenticación mutua
     IoT_registration()
     mutual_authentication()
     # Simula el envío de métricas al Gateway
-    message_authetication()
+    # send_encrypted_metrics()

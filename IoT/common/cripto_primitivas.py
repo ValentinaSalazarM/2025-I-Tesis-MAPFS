@@ -27,7 +27,7 @@ def Hash(*dataListByte):
     h.update(Mydata)
     HashResult = h.hexdigest()
     HashInt = int(HashResult, 16)
-    Hash_value = HashInt % P256.q
+    Hash_value = truncate_to_16_digits(HashInt)
     return Hash_value
 
 def Hash_MAPFS(dataListByte):

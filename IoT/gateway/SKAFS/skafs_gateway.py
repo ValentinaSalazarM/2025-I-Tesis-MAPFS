@@ -14,6 +14,8 @@ logger = logging.getLogger("Gateway")
 # Configuración del servidor socket
 HOST = "0.0.0.0"  # Dirección IP del Gateway
 PORT = 5000  # Puerto del Gateway
+
+# Configuración del servidor socket de comunicación para registro con el Cloud
 CA_HOST = "skafs-cloud"  # Dirección de la CA
 CA_PORT = 5001  # Puerto de la CA
 cloud_socket = None
@@ -25,20 +27,22 @@ CA_Identity = None
 registration_parameters = {}
 gateway_identity = int.from_bytes(os.urandom(8), "big")
 
-# Llaves de sesión con dispositivos IoT
-session_keys = {}
+# Dispositivos IoT autenticados
+authenticated_devices = {}
 
 
 #######################################################
 #               SERVIDOR SOCKET GATEWAY               #
 #######################################################
+
+
 def start_gateway_socket():
     """
     Inicia el servidor socket para manejar conexiones del IoT Device.
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
         server_socket.bind((HOST, PORT))
-        server_socket.listen(5)
+        server_socket.listen()
         logger.info(f"Socket Gateway escuchando en {HOST}:{PORT}")
 
         while True:
@@ -102,7 +106,7 @@ def gateway_registration():
         # Crear el mensaje a enviar
         first_payload = {
             "operation": "register_gateway",
-            "Gateway_Identity": gateway_identity,
+            "gateway_identity": gateway_identity,
         }
         logger.info("[REG] Enviando Gateway_Identity al CA.")
 
@@ -148,6 +152,7 @@ def gateway_registration():
         logger.error(f"[REG] Error inesperado: {e}")
     finally:
         close_socket()
+        logger.info("[REG] Conexión con el CA cerrada.")
 
 
 #######################################################
@@ -159,11 +164,13 @@ def handle_mutual_authentication(client_socket, message):
     """
     Maneja la conexión de un cliente (IoT Device) y ejecuta el protocolo de autenticación mutua con el CA.
     """
-    global registration_parameters
+    global registration_parameters, authenticated_devices
     try:
+        device_ip, device_port = client_socket.getpeername()
+
         # Paso 1: Recibir mensaje "hello" del dispositivo IoT
         if message.get("step") != "hello":
-            raise ValueError("Paso incorrecto recibido del dispositivo.")
+            raise KeyError("Paso incorrecto recibido del dispositivo.")
 
         # Paso 2: Generar r_1 y enviarlo al dispositivo IoT
         G_r_1 = int.from_bytes(os.urandom(8), "big")
@@ -181,17 +188,21 @@ def handle_mutual_authentication(client_socket, message):
 
         # Paso 4: Generar parámetros de autenticación y enviarlos a la CA
         G_nonce = int.from_bytes(os.urandom(8), "big")
+
         logger.info(f"[AUTH] registration_parameters: {registration_parameters}")
-        G_MK_G_CA = registration_parameters["G_MK_G_CA"]
-        G_Sync_K_G_CA = registration_parameters["G_Sync_K_G_CA"]
-        returnData = generate_sigma1_sigma2_epison1(
+
+        G_MK_G_CA = registration_parameters.get("G_MK_G_CA")
+        G_Sync_K_G_CA = registration_parameters.get("G_Sync_K_G_CA")
+        return_data = generate_sigma1_sigma2_epison1(
             G_nonce, G_MK_G_CA, G_Sync_K_G_CA, G_r_1, IoT_M1
         )
-        iv = returnData[8]
-        HashResult = returnData[9]
-        message = returnData[:9]
+
+        iv = return_data[8]
+        HashResult = return_data[9]
+        message = return_data[:9]
         payload = {
             "operation": "mutual_authentication",
+            "device_ip": device_ip,
             "G_nonce": message[0],
             "G_sigma_1": message[1],
             "G_sigma_2": message[2],
@@ -202,7 +213,16 @@ def handle_mutual_authentication(client_socket, message):
             "Epison_1_5": message[7],
             "iv": iv,
         }
+
         ca_response = send_and_receive_persistent_socket(payload)
+
+        if (
+            ca_response.get("status") == "failed"
+            or ca_response.get("status") == "error"
+        ):
+            raise PermissionError(
+                "El proceso de autenticación ha sido detenido por el CA."
+            )
         logger.info("[AUTH] Parámetros enviados a la CA para autenticación mutua.")
 
         # Paso 5: Recibir respuesta de la CA
@@ -227,7 +247,7 @@ def handle_mutual_authentication(client_socket, message):
         logger.info("[AUTH] Claves y parámetros de sincronización recibidos de la CA.")
 
         # Paso 6: Enviar G_M_2 y Sync_IoT_G al dispositivo IoT
-        returnData = checking_synchronization_bet_gateway_IoT(
+        return_data = checking_synchronization_bet_gateway_IoT(
             [CA_sigma_3, Epison_2_1, Epison_2_2, Epison_2_3, Epison_2_4, D_sync_CA_G],
             G_nonce,
             IoT_M1,
@@ -236,11 +256,11 @@ def handle_mutual_authentication(client_socket, message):
             HashResult,
         )
         # message=G_M_2, Sync_IoT_G,
-        message = returnData[:2]
-        G_K_a = returnData[2]
-        G_K_previous = returnData[3]
-        G_K_current = returnData[4]
-        G_r_3 = returnData[5]
+        message = return_data[:2]
+        G_K_a = return_data[2]
+        G_K_previous = return_data[3]
+        G_K_current = return_data[4]
+        G_r_3 = return_data[5]
 
         payload = {"operation": "mutual_authentication", "G_M_2": message}
         client_socket.sendall(json.dumps(payload).encode("utf-8"))
@@ -253,17 +273,25 @@ def handle_mutual_authentication(client_socket, message):
                 "[AUTH] Falta K_i_next_obfuscated en la respuesta del dispositivo IoT."
             )
 
-        returnData = getting_encrypting_next_session_key(
+        return_data = getting_encrypting_next_session_key(
             data.get("K_i_next_obfuscated"), iv, HashResult, G_K_a
         )
-        Epison_3_1 = returnData[0]
-        G_IoT_K_i_next = returnData[1]
+        Epison_3_1 = return_data[0]
+        G_IoT_K_i_next = return_data[1]
         logger.info("[AUTH] Recibido IoT_K_i_next_obfuscated del dispositivo IoT.")
 
         # Paso 8: Enviar Epison_3_1 a la CA
         payload = {"operation": "mutual_authentication", "Epison_3_1": Epison_3_1}
         ca_response = send_and_receive_persistent_socket(payload)
         logger.info(f"[AUTH] Epison_3_1 enviado a la CA.")
+
+        if (
+            ca_response.get("status") == "failed"
+            or ca_response.get("status") == "error"
+        ):
+            raise PermissionError(
+                "El proceso de autenticación ha sido detenido por el CA."
+            )
 
         # Paso 9: Recibir M_3 de la CA
         if "M_3" not in ca_response:
@@ -283,7 +311,10 @@ def handle_mutual_authentication(client_socket, message):
         )
         K_s_int = int(str(K_s_int)[:16])
         K_s_bytes = K_s_int.to_bytes(AES.block_size, "big")
-        session_keys[IoT_M1["ID*"]] = K_s_bytes
+
+        unique_identifier = IoT_M1.get("ID*")
+        authenticated_devices[unique_identifier] = {"session_key": K_s_bytes}
+
         client_socket.sendall(
             json.dumps({"operation": "mutual_authentication", "M_4": M_4}).encode(
                 "utf-8"
@@ -292,12 +323,22 @@ def handle_mutual_authentication(client_socket, message):
         logger.info("[AUTH] Mensaje M_4 enviado al dispositivo IoT.")
         logger.info(f"[AUTH] Autenticación mutua culminada.")
 
+    except PermissionError as e:
+        logger.error(f"[AUTH] Error de autenticación: {e}")
+        response = {"status": "failed", "message": str(e)}
+        client_socket.sendall(json.dumps(response).encode("utf-8"))
     except KeyError as e:
-        logger.error(f"Error de clave faltante en los datos recibidos: {e}")
+        logger.error(f"[AUTH] Clave faltante en los datos recibidos: {e}")
+        response = {"status": "error", "message": str(e)}
+        client_socket.sendall(json.dumps(response).encode("utf-8"))
     except Exception as e:
-        logger.error(f"Error inesperado durante la autenticación mutua: {e}")
+        logger.error(f"[AUTH] Error durante la autenticación mutua: {e}")
+        response = {"status": "error", "message": str(e)}
+        client_socket.sendall(json.dumps(response).encode("utf-8"))
     finally:
         client_socket.close()
+        close_socket()
+        logger.info("[AUTH] Conexión con el CA cerrada.")
 
 
 def generate_sigma1_sigma2_epison1(G_nonce, G_MK_G_CA, G_Sync_K_G_CA, G_r_1, IoT_M1):
@@ -446,6 +487,88 @@ def updating_synchronization_keys(
 
 
 #######################################################
+#                 INTERCAMBIAR MENSAJES               #
+#######################################################
+
+
+def handle_send_metrics(client_socket, message):
+    """
+    Manejar el mensaje 'send_metrics' enviado por el dispositivo IoT.
+
+    Args:
+        client_socket: El socket del cliente IoT.
+        message (dict): Mensaje recibido del dispositivo IoT.
+    """
+    try:
+        # Extraer los campos necesarios del mensaje
+        authentication_id = message.get("ID_obfuscated")
+        iv_base64 = message.get("iv")
+        encrypted_metrics_base64 = message.get("encrypted_metrics")
+
+        if not authentication_id or not iv_base64 or not encrypted_metrics_base64:
+            raise ValueError(
+                "Faltan campos en el mensaje recibido ('ID_obfuscated', 'iv' o 'encrypted_metrics')."
+            )
+
+        # Verificar si el dispositivo está autenticado
+        authentication_parameters = authenticated_devices.get(authentication_id)
+        if not authentication_parameters:
+            response = {
+                "status": "failed",
+                "message": "Dispositivo no autenticado. No se aceptan métricas.",
+            }
+            client_socket.sendall(json.dumps(response).encode("utf-8"))
+            raise ValueError(f"Dispositivo con ID: {authentication_id} no autenticado.")
+
+        # Extraer métricas cifradas
+        iv_base64 = message.get("iv")
+        encrypted_metrics_base64 = message.get("encrypted_metrics")
+
+        if not iv_base64 or not encrypted_metrics_base64:
+            raise ValueError(
+                "Faltan campos en el mensaje recibido ('iv', 'encrypted_metrics')."
+            )
+
+        # Obtener la clave de sesión del dispositivo
+        K_s_bytes = authentication_parameters.get("session_key")
+        if not K_s_bytes:
+            raise ValueError(
+                f"No se encontró una llave de sesión para {authentication_id}."
+            )
+
+        # Decodificar IV y métricas cifradas desde Base64
+        iv = base64.b64decode(iv_base64)
+        encrypted_metrics = base64.b64decode(encrypted_metrics_base64)
+
+        # Descifrar y deshacer el padding de las métricas
+        cipher = AES.new(K_s_bytes, AES.MODE_CBC, iv)
+        decrypted_metrics_json = unpad(
+            cipher.decrypt(encrypted_metrics), AES.block_size
+        )
+
+        # Convertir las métricas descifradas de JSON a diccionario
+        metrics = json.loads(decrypted_metrics_json.decode("utf-8"))
+        logger.info(f"[METRICS] Métricas recibidas descifradas: {metrics}")
+
+        # Enviar respuesta de éxito al dispositivo IoT
+        response = {
+            "status": "success",
+            "message": "Métricas recibidas correctamente.",
+        }
+        client_socket.sendall(json.dumps(response).encode("utf-8"))
+        logger.info("[METRICS] Respuesta enviada al dispositivo IoT.")
+
+    except (ValueError, KeyError) as e:
+        logger.error(f"[METRICS] Error en el mensaje recibido: {e}")
+        response = {"status": "error", "message": str(e)}
+        client_socket.sendall(json.dumps(response).encode("utf-8"))
+    except Exception as e:
+        logger.error(f"[METRICS] Error durante el manejo de métricas: {e}")
+        response = {"status": "error", "message": "Error inesperado."}
+        client_socket.sendall(json.dumps(response).encode("utf-8"))
+
+
+#######################################################
 #                      AUXILIARES                     #
 #######################################################
 
@@ -498,7 +621,7 @@ def send_and_receive_persistent_socket(message_dict):
                 )  # Convertir bytes a base64 y luego a str
             else:
                 encoded_message[key] = value
-        # logger.info(f"send_and_receive_persistent_socket- encoded_message={encoded_message}"#)
+        # logger.info(f"send_and_receive_persistent_socket- encoded_message={encoded_message}")
         cloud_socket.sendall(
             json.dumps(encoded_message).encode("utf-8")
         )  # Enviar mensaje
@@ -523,68 +646,6 @@ def send_and_receive_persistent_socket(message_dict):
         logger.error(f"Error en la comunicación por socket persistente: {e}")
         cloud_socket = None  # Marcar el socket como no válido
         raise e
-
-
-#######################################################
-#                 INTERCAMBIAR MENSAJES               #
-#######################################################
-
-
-def handle_send_metrics(client_socket, message):
-    """
-    Manejar el mensaje 'send_metrics' enviado por el dispositivo IoT.
-
-    Args:
-        client_socket: El socket del cliente IoT.
-        message (dict): Mensaje recibido del dispositivo IoT.
-    """
-    try:
-        # Extraer los campos necesarios del mensaje
-        ID_obfuscated = message.get("ID_obfuscated")
-        iv_base64 = message.get("iv")
-        encrypted_metrics_base64 = message.get("encrypted_metrics")
-
-        if not ID_obfuscated or not iv_base64 or not encrypted_metrics_base64:
-            raise ValueError(
-                "Faltan campos en el mensaje recibido ('ID_obfuscated', 'iv' o 'encrypted_metrics')."
-            )
-
-        # Buscar la llave de sesión correspondiente
-        K_s_bytes = session_keys.get(ID_obfuscated)
-        if not K_s_bytes:
-            raise ValueError(
-                f"No se encontró una llave de sesión para ID_obfuscated={ID_obfuscated}."
-            )
-
-        # Decodificar IV y las métricas cifradas desde Base64
-        iv = base64.b64decode(iv_base64)
-        encrypted_metrics = base64.b64decode(encrypted_metrics_base64)
-
-        # Crear el descifrador AES en modo CBC
-        cipher = AES.new(K_s_bytes, AES.MODE_CBC, iv)
-
-        # Descifrar y deshacer el padding de las métricas
-        decrypted_metrics_json = unpad(
-            cipher.decrypt(encrypted_metrics), AES.block_size
-        )
-
-        # Convertir las métricas descifradas de JSON a diccionario
-        metrics = json.loads(decrypted_metrics_json.decode("utf-8"))
-        logger.info(f"[METRICS] Métricas recibidas descifradas: {metrics}")
-
-        # Enviar respuesta al dispositivo IoT
-        response = {"status": "success", "message": "Métricas recibidas correctamente."}
-        client_socket.sendall(json.dumps(response).encode("utf-8"))
-        logger.info("[METRICS] Respuesta enviada al dispositivo IoT.")
-
-    except (ValueError, KeyError) as e:
-        logger.error(f"[METRICS] Error en el mensaje recibido: {e}")
-        response = {"status": "error", "message": str(e)}
-        client_socket.sendall(json.dumps(response).encode("utf-8"))
-    except Exception as e:
-        logger.error(f"[METRICS] Error inesperado durante el manejo de métricas: {e}")
-        response = {"status": "error", "message": "Error inesperado."}
-        client_socket.sendall(json.dumps(response).encode("utf-8"))
 
 
 if __name__ == "__main__":

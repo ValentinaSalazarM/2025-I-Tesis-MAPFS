@@ -120,6 +120,7 @@ services:
     ports:
       - 8010:8010 #Prometheus
       - 5000:5000 #Socket
+      - 6000:6000 #Socket revocation
     command: ["python", "-m", "gateway.mapfs_gateway"]
   
   mapfs-device:

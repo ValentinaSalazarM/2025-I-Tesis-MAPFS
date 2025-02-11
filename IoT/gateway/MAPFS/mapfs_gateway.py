@@ -1,4 +1,5 @@
 from common.cripto_primitivas import *
+import threading
 
 # Métricas
 from prometheus_client import start_http_server, Counter
@@ -11,9 +12,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("Gateway")
 
-# Configuración del servidor socket
-HOST = "0.0.0.0"  # Dirección IP del Gateway
-PORT = 5000  # Puerto del Gateway
+# Configuración de los servidores socket de comunicación
+HOST = "0.0.0.0"
+PORT = 5000
+REVOCATION_PORT = 6000
+
+# Configuración del servidor socket de comunicación para registro con el Cloud
 CA_HOST = "mapfs-cloud"  # Dirección de la CA
 CA_PORT = 5001  # Puerto de la CA
 cloud_socket = None
@@ -29,20 +33,25 @@ P_IoT_key_yValue = None
 registration_parameters = {}
 gateway_identity = int.from_bytes(os.urandom(8), "big")
 
-# Llaves de sesión con dispositivos IoT
-session_keys = {}
+# Dispositivos IoT autenticados
+authenticated_devices = {}
+
+# Estructura para almacenar los dispositivos revocados
+revoked_devices = {}
 
 
 #######################################################
 #               SERVIDOR SOCKET GATEWAY               #
 #######################################################
+
+
 def start_gateway_socket():
     """
     Inicia el servidor socket para manejar conexiones del IoT Device.
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
         server_socket.bind((HOST, PORT))
-        server_socket.listen(5)
+        server_socket.listen()
         logger.info(f"Socket Gateway escuchando en {HOST}:{PORT}")
 
         while True:
@@ -170,6 +179,7 @@ def gateway_registration():
         logger.error(f"[REG] Error inesperado: {e}")
     finally:
         close_socket()
+        logger.info("[REG] Conexión con el CA cerrada.")
 
 
 #######################################################
@@ -186,7 +196,7 @@ def handle_mutual_authentication(client_socket, hello_message):
 
         # Paso 1: Recibir mensaje "hello" del dispositivo IoT
         if hello_message.get("step") != "hello":
-            raise ValueError("Paso incorrecto recibido del dispositivo.")
+            raise KeyError("Paso incorrecto recibido del dispositivo.")
         logger.info(f"[AUTH] Mensaje recibido del IoT Device: {hello_message}")
 
         # Paso 2: Enviar el token al dispositivo IoT: W, ID_w, X_w_pub_key, Y_w_pub_key, sigmaZ
@@ -234,14 +244,18 @@ def handle_mutual_authentication(client_socket, hello_message):
         response = {"operation": "mutual_authentication", "status": "success"}
         client_socket.sendall(json.dumps(response).encode("utf-8"))
         logger.info(f"[AUTH] Autenticación mutua culminada.")
-
     except KeyError as e:
-        logger.error(f"Error de clave faltante en los datos recibidos: {e}")
+        logger.error(f"[AUTH] Clave faltante en los datos recibidos: {e}")
+        response = {"status": "error", "message": str(e)}
+        client_socket.sendall(json.dumps(response).encode("utf-8"))
     except Exception as e:
-        logger.error(f"Error inesperado durante la autenticación mutua: {e}")
+        logger.error(f"[AUTH] Error durante la autenticación mutua: {e}")
+        response = {"status": "error", "message": str(e)}
+        client_socket.sendall(json.dumps(response).encode("utf-8"))
     finally:
         client_socket.close()
         close_socket()
+        logger.info("[AUTH] Conexión con el CA cerrada.")
 
 
 def generating_gateway_auth_token(hello_data):
@@ -275,7 +289,7 @@ def generating_gateway_auth_token(hello_data):
 
 
 def IoT_Authentication(iot_auth_token, hello_data, W_dict, rng_5):
-    global registration_parameters, P_IoT_key_xValue, P_IoT_key_yValue
+    global registration_parameters, P_IoT_key_xValue, P_IoT_key_yValue, authenticated_devices
 
     # Inicializar las variables recibidas
     P_1_dict = iot_auth_token.get("P_1")
@@ -303,24 +317,24 @@ def IoT_Authentication(iot_auth_token, hello_data, W_dict, rng_5):
 
     # Cómputo de I_a
     I_a = Hash_MAPFS(
-        [A_dict.get("x"),
-        A_dict.get("y"),
-        P_1_dict.get("x"),
-        P_1_dict.get("y"),
-        P_2_dict.get("x"),
-        P_2_dict.get("y"),
-        P_3_dict.get("x"),
-        P_3_dict.get("y"),
-        T_1_dict.get("x"),
-        T_1_dict.get("y"),
-        T_2_dict.get("x"),
-        T_2_dict.get("y"),
-        W_dict.get("x"),
-        W_dict.get("y"),]
+        [
+            A_dict.get("x"),
+            A_dict.get("y"),
+            P_1_dict.get("x"),
+            P_1_dict.get("y"),
+            P_2_dict.get("x"),
+            P_2_dict.get("y"),
+            P_3_dict.get("x"),
+            P_3_dict.get("y"),
+            T_1_dict.get("x"),
+            T_1_dict.get("y"),
+            T_2_dict.get("x"),
+            T_2_dict.get("y"),
+            W_dict.get("x"),
+            W_dict.get("y"),
+        ]
     )
-    logger.info(
-        "[AUTH] Verificando la firma del IoT."
-    )
+    logger.info("[AUTH] Verificando la firma del IoT.")
     assert sigma_t * P256.G == (
         I_a * P_1 + I_a * P_2 + I_a * P_3 + A
     ), "Error autenticando el dispositivo IoT."
@@ -333,9 +347,7 @@ def IoT_Authentication(iot_auth_token, hello_data, W_dict, rng_5):
     ), "Error verificando la llave pública del CA.."
     assert s_2 * P_1 == (I_a * P_3 + T_2), "Error verificando I_1"
 
-    logger.info(
-        "[AUTH] Llave pública del CA y I_1 verificados."
-    )
+    logger.info("[AUTH] Llave pública del CA y I_1 verificados.")
     # Función de hash H_0(r_5x_wA)
     x_w_priv_key = registration_parameters.get("x_w_priv_key")
     A_xValue = (rng_5 * x_w_priv_key * A).x
@@ -345,7 +357,262 @@ def IoT_Authentication(iot_auth_token, hello_data, W_dict, rng_5):
     K_s_int = int(str(K_s_int)[:16])
     logger.info(f"[AUTH] La llave de sesión en el gateway es: {K_s_int}")
     K_s_bytes = K_s_int.to_bytes(AES.block_size, "big")
-    session_keys[(P_1_dict,P_3_dict)] = K_s_bytes
+
+    # Hash derivado de las claves públicas efímeras del IoT y el Gateway para identificar la sesión autenticada
+    unique_identifier = Hash_MAPFS(
+        [A_dict.get("x"), A_dict.get("y"), W_dict.get("x"), W_dict.get("y")]
+    )
+    authenticated_devices[unique_identifier] = {
+        "session_key": K_s_bytes,
+        "P_1": P_1_dict,
+        "P_3": P_3_dict,
+    }
+    logger.info(f"[AUTH] unique_identifier: {unique_identifier}")
+
+
+#######################################################
+#                 INTERCAMBIAR MENSAJES               #
+#######################################################
+
+
+def handle_send_metrics(client_socket, message):
+    """
+    Manejar el mensaje 'send_metrics' enviado por el dispositivo IoT.
+
+    Args:
+        client_socket: El socket del cliente IoT.
+        message (dict): Mensaje recibido del dispositivo IoT.
+    """
+
+    try:
+        # Extraer parámetros de autenticación
+        A_dict = message.get("A")
+        W_dict = message.get("W")
+
+        if not A_dict or not W_dict:
+            raise ValueError(
+                "Faltan claves públicas en el mensaje recibido ('A', 'W')."
+            )
+
+        # Generar el identificador único del dispositivo
+        authentication_id = Hash_MAPFS(
+            [A_dict.get("x"), A_dict.get("y"), W_dict.get("x"), W_dict.get("y")]
+        )
+
+        # Verificar si el dispositivo está autenticado
+        authentication_parameters = authenticated_devices.get(authentication_id)
+        if not authentication_parameters:
+            response = {
+                "status": "failed",
+                "message": "Dispositivo no autenticado. No se aceptan métricas.",
+            }
+            client_socket.sendall(json.dumps(response).encode("utf-8"))
+            raise ValueError(f"Dispositivo con ID: {authentication_id} no autenticado.")
+
+        # Verificar si el dispositivo está revocado
+        P_1_dict = authentication_parameters.get("P_1")
+        P_3_dict = authentication_parameters.get("P_3")
+
+        if not P_1_dict or not P_3_dict:
+            raise ValueError(f"Faltan parámetros P_1 y P_3 para verificar revocación.")
+
+        if is_device_revoked(P_1_dict, P_3_dict):
+            logger.warning(
+                f"[METRICS] Dispositivo revocado intentó enviar métricas. Bloqueando acceso."
+            )
+            response = {
+                "status": "failed",
+                "message": "Dispositivo revocado. No se aceptan métricas.",
+            }
+            client_socket.sendall(json.dumps(response).encode("utf-8"))
+            raise ValueError("Dispositivo revocado.")
+
+        # Extraer métricas cifradas
+        iv_base64 = message.get("iv")
+        encrypted_metrics_base64 = message.get("encrypted_metrics")
+
+        if not iv_base64 or not encrypted_metrics_base64:
+            raise ValueError(
+                "Faltan campos en el mensaje recibido ('iv', 'encrypted_metrics')."
+            )
+
+        # Obtener la clave de sesión del dispositivo
+        K_s_bytes = authentication_parameters.get("session_key")
+        if not K_s_bytes:
+            raise ValueError(
+                f"No se encontró una llave de sesión para {authentication_id}."
+            )
+
+        # Decodificar IV y métricas cifradas desde Base64
+        iv = base64.b64decode(iv_base64)
+        encrypted_metrics = base64.b64decode(encrypted_metrics_base64)
+
+        # Descifrar y deshacer el padding de las métricas
+        cipher = AES.new(K_s_bytes, AES.MODE_CBC, iv)
+        decrypted_metrics_json = unpad(
+            cipher.decrypt(encrypted_metrics), AES.block_size
+        )
+
+        # Convertir las métricas descifradas de JSON a diccionario
+        metrics = json.loads(decrypted_metrics_json.decode("utf-8"))
+        logger.info(f"[METRICS] Métricas recibidas descifradas: {metrics}")
+
+        # Enviar respuesta de éxito al dispositivo IoT
+        response = {
+            "status": "success",
+            "message": "Métricas recibidas correctamente.",
+        }
+        client_socket.sendall(json.dumps(response).encode("utf-8"))
+        logger.info("[METRICS] Respuesta enviada al dispositivo IoT.")
+
+    except (ValueError, KeyError) as e:
+        logger.error(f"[METRICS] Error en el mensaje recibido: {e}")
+        response = {"status": "error", "message": str(e)}
+        client_socket.sendall(json.dumps(response).encode("utf-8"))
+
+    except Exception as e:
+        logger.error(f"[METRICS] Error inesperado durante el manejo de métricas: {e}")
+        response = {"status": "error", "message": "Error inesperado."}
+        client_socket.sendall(json.dumps(response).encode("utf-8"))
+
+
+def is_device_revoked(P_1_dict, P_3_dict):
+    """
+    Verifica si un dispositivo IoT está en la lista de revocados.
+    """
+    revocation_id = Hash_MAPFS(
+        [P_1_dict.get("x"), P_1_dict.get("y"), P_3_dict.get("x"), P_3_dict.get("y")]
+    )
+    return revocation_id in revoked_devices
+
+
+#######################################################
+#                 REVOCAR IDENTIDADES                 #
+#######################################################
+
+
+def report_misbehaving_device():
+    """
+    Evalúa periódicamente si un dispositivo IoT autenticado se comporta de manera maliciosa
+    y lo reporta al Cloud con los parámetros P1 y P3.
+    """
+    global authenticated_devices
+    logger.info(f"Monitoreando actividad sospechosa de los dispositivos")
+    while True:
+        for unique_identifier, session_data in authenticated_devices.items():
+            authenticated = len(authenticated_devices)
+            logger.info(f"Conteo: {authenticated}")
+
+            # Detección de anomalías
+            if detect_suspicious_activity(unique_identifier):
+                logger.warning(
+                    f"[REVOC] Actividad sospechosa detectada para {unique_identifier}. Solicitando revocación."
+                )
+
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        logger.info(
+                            f"[REVOC] Enviando solicitud de revocación a {CA_HOST}:{CA_PORT}."
+                        )
+                        s.connect((CA_HOST, CA_PORT))
+
+                        # Enviar solicitud al Cloud
+                        P1 = session_data.get("P_1")
+                        P3 = session_data.get("P_3")
+                        payload = {
+                            "operation": "identify_and_revoke",
+                            "P_1": P1,
+                            "P_3": P3,
+                        }
+                        s.sendall(json.dumps(payload).encode())
+                        
+                        response = s.recv(4096)
+                        last_response = json.loads(response.decode())
+                        if last_response.get("status") == "failed" or last_response.get("status") == "error":
+                            logger.error("Las métricas no han sido procesadas exitosamente.")
+
+                except Exception as e:
+                    logger.error(f"[REVOC] Error al contactar con el Cloud: {e}")
+        time.sleep(400)  
+
+
+def listen_for_revocation():
+    """
+    Servidor socket exclusivo para recibir órdenes de revocación del Cloud.
+    """
+    global revoked_devices
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+        server_socket.bind((HOST, REVOCATION_PORT))
+        server_socket.listen()
+        logger.info(
+            f"[REVOC] Esperando respuestas de revocación en el puerto {REVOCATION_PORT}."
+        )
+
+        while True:
+            try:
+                client_socket, addr = server_socket.accept()
+                with client_socket:
+                    response = json.loads(client_socket.recv(4096).decode())
+
+                    if "ID_a" not in response:
+                        logger.error(
+                            "[REVOC] Respuesta inválida del Cloud: Falta ID_a."
+                        )
+                        return
+
+                    logger.info(f"[REVOC] Mensaje recibido: {response}")
+                    P_1_dict = response.get("P_1")
+                    P_3_dict = response.get("P_3")
+
+                    if not P_1_dict or not P_3_dict:
+                        logger.error("[REVOC] Respuesta inválida del Cloud.")
+                        return
+
+                    # Registrar el dispositivo en la lista de revocados
+                    revocation_id = Hash_MAPFS(
+                        [
+                            P_1_dict.get("x"),
+                            P_1_dict.get("y"),
+                            P_3_dict.get("x"),
+                            P_3_dict.get("y"),
+                        ]
+                    )
+                    revoked_devices[revocation_id] = response.get("ID_a")
+                    logger.info(f"[REVOC] revocation_id = {revocation_id}")
+                    found = False
+                    for (
+                        unique_identifier,
+                        session_data,
+                    ) in authenticated_devices.items():
+                        logger.info(f"unique_identifier = {unique_identifier}")
+                        if P_1_dict == session_data.get(
+                            "P_1"
+                        ) and P_3_dict == session_data.get("P_3"):
+                            found = authenticated_devices.pop(
+                                unique_identifier, None
+                            )  # Elimina la clave y devuelve su valor
+                            if found:
+                                logger.info(
+                                    f"[REVOC] Dispositivo revocado y bloqueado."
+                                )
+                            break
+                    if not found:
+                        logger.info(
+                            f"[REVOC] El dispositivo ya ha sido revocado y bloqueado previamente."
+                        )
+            except Exception as e:
+                logger.error(f"Error durante la revocación: {e}")
+
+
+def detect_suspicious_activity(unique_identifier):
+    """
+    Lógica para detectar dispositivos IoT que se comportan de manera maliciosa.
+    - Se podría ampliar con reglas de detección de tráfico anómalo, intentos fallidos, etc.
+    """
+    # Simulación: Cada 60 segundos, hay un 10% de probabilidad de marcar a un dispositivo como sospechoso
+    suspicious = (time.time() + hash(unique_identifier)) % 60 < 6
+    return suspicious
+
 
 #######################################################
 #                      AUXILIARES                     #
@@ -427,77 +694,29 @@ def send_and_receive_persistent_socket(message_dict):
         raise e
 
 
-#######################################################
-#                 INTERCAMBIAR MENSAJES               #
-#######################################################
-
-
-def handle_send_metrics(client_socket, message):
-    """
-    Manejar el mensaje 'send_metrics' enviado por el dispositivo IoT.
-
-    Args:
-        client_socket: El socket del cliente IoT.
-        message (dict): Mensaje recibido del dispositivo IoT.
-    """
-    try:
-        # Extraer los campos necesarios del mensaje
-        P_1 = message.get("P_1")
-        P_3 = message.get("P_3")
-        identifier = (P_1, P_3)
-        iv_base64 = message.get("iv")
-        encrypted_metrics_base64 = message.get("encrypted_metrics")
-
-        if not identifier or not iv_base64 or not encrypted_metrics_base64:
-            raise ValueError(
-                "Faltan campos en el mensaje recibido ('h_a', 'iv' o 'encrypted_metrics')."
-            )
-
-        # Buscar la llave de sesión correspondiente
-        K_s_bytes = session_keys.get(identifier)
-        if not K_s_bytes:
-            raise ValueError(
-                f"No se encontró una llave de sesión para <P_1, P_3>={identifier}."
-            )
-
-        # Decodificar IV y las métricas cifradas desde Base64
-        iv = base64.b64decode(iv_base64)
-        encrypted_metrics = base64.b64decode(encrypted_metrics_base64)
-
-        # Crear el descifrador AES en modo CBC
-        cipher = AES.new(K_s_bytes, AES.MODE_CBC, iv)
-
-        # Descifrar y deshacer el padding de las métricas
-        decrypted_metrics_json = unpad(
-            cipher.decrypt(encrypted_metrics), AES.block_size
-        )
-
-        # Convertir las métricas descifradas de JSON a diccionario
-        metrics = json.loads(decrypted_metrics_json.decode("utf-8"))
-        logger.info(f"[METRICS] Métricas recibidas descifradas: {metrics}")
-
-        # Enviar respuesta al dispositivo IoT
-        response = {"status": "success", "message": "Métricas recibidas correctamente."}
-        client_socket.sendall(json.dumps(response).encode("utf-8"))
-        logger.info("[METRICS] Respuesta enviada al dispositivo IoT.")
-
-    except (ValueError, KeyError) as e:
-        logger.error(f"[METRICS] Error en el mensaje recibido: {e}")
-        response = {"status": "error", "message": str(e)}
-        client_socket.sendall(json.dumps(response).encode("utf-8"))
-    except Exception as e:
-        logger.error(f"[METRICS] Error inesperado durante el manejo de métricas: {e}")
-        response = {"status": "error", "message": "Error inesperado."}
-        client_socket.sendall(json.dumps(response).encode("utf-8"))
-
 if __name__ == "__main__":
     time.sleep(10)
-    # Inicia el servidor de métricas Prometheus
+
+    # Iniciar el servidor de métricas Prometheus
     logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8010.")
     start_http_server(8010)
-    
-    # Realiza el registro ante el CA
+
+    # Realizar el registro ante el CA
     gateway_registration()
-    
-    # Inicia el socket
-    start_gateway_socket()
+
+    # Iniciar el socket para autenticación y comunicación con IoT devices
+    socket_thread = threading.Thread(target=start_gateway_socket, daemon=True)
+    socket_thread.start()
+
+    # Iniciar el servidor de revocación en un hilo separado
+    revocation_thread = threading.Thread(target=listen_for_revocation, daemon=True)
+    revocation_thread.start()
+
+    # Iniciar el monitoreo de dispositivos maliciosos
+    monitoring_thread = threading.Thread(target=report_misbehaving_device, daemon=True)
+    monitoring_thread.start()
+
+    # Mantener el programa en ejecución
+    socket_thread.join()
+    revocation_thread.join()
+    monitoring_thread.join()

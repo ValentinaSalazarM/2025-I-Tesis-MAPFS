@@ -2,10 +2,7 @@ import subprocess
 from scapy.all import IP, TCP, rdpcap
 from datetime import datetime
 
-import binascii
 import logging
-import socket
-import base64
 import time
 import json
 import os
@@ -21,13 +18,14 @@ logger = logging.getLogger("Sniffer-Capture")
 
 # Configuración
 SHARED_DIR = "/shared_data"
-CAPTURE_INTERVAL = 60  
-MIN_FILE_SIZE = 2048
+CAPTURE_INTERVAL = 30
+MIN_FILE_SIZE = 1024
 
 def analyze_pcap(pcap_file):
     """Analiza un archivo pcap y genera metadatos estructurados"""
 
-    analysis = {"ip_role_mapping": {}, "comms": {}}
+    analysis = {"comms": {}}
+    ip_role_mapping = {}
     try:
         packets = rdpcap(pcap_file)
 
@@ -44,84 +42,80 @@ def analyze_pcap(pcap_file):
                 payload_data = json.loads(payload)
             except json.JSONDecodeError:
                 payload_data = payload  # Si no es JSON, guardar como texto
-
             # Actualizar mapeo de roles según operación
             if payload_data and isinstance(payload_data, dict):
                 operation = payload_data.get("operation", "")
-                logger.info(f"payload_data={payload_data}")
-                # Registro de dispositivo
-                if operation == "register_device":
-                    analysis["ip_role_mapping"].update(
-                        {src_ip: "device", dst_ip: "cloud"}
-                    )
-                # Registro de Gateway
-                elif operation == "register_gateway":
-                    analysis["ip_role_mapping"].update(
-                        {src_ip: "gateway", dst_ip: "cloud"}
-                    )
+                if operation != "":
+                    # Registro de dispositivo
+                    if operation == "register_device":
+                        ip_role_mapping[src_ip] = {"host": "device", "port": ""}
+                        ip_role_mapping[dst_ip] = {"host": "cloud", "port": dst_port}
+                    # Registro de Gateway
+                    elif operation == "register_gateway":
+                        ip_role_mapping[src_ip] = {"host": "gateway", "port": ""}
+                        ip_role_mapping[dst_ip] = {"host": "cloud", "port": dst_port}
 
-                if operation != "" and not operation.startswith("register"):
-                    # Procesar payload
-                    parsed_payload = {}
-                    for key, value in payload_data.items():
-                        # Convertir a entero si es posible
-                        if isinstance(value, str) and value.isdigit():
-                            parsed_payload[key] = int(value)
-                        elif isinstance(value, dict):
-                            # Convertir valores dentro de diccionarios anidados
-                            parsed_payload[key] = {
-                                k: (int(v) if isinstance(v, str) and v.isdigit() else v)
-                                for k, v in value.items()
-                            }
-                        else:
-                            parsed_payload[key] = value
+                    if operation.startswith("mutual_authentication"):
+                        # Procesar payload
+                        parsed_payload = {}
+                        for key, value in payload_data.items():
+                            # Convertir a entero si es posible
+                            if isinstance(value, str) and value.isdigit():
+                                parsed_payload[key] = int(value)
+                            elif isinstance(value, dict):
+                                # Convertir valores dentro de diccionarios anidados
+                                parsed_payload[key] = {
+                                    k: (int(v) if isinstance(v, str) and v.isdigit() else v)
+                                    for k, v in value.items()
+                                }
+                            else:
+                                parsed_payload[key] = value
 
-                    entry = {
-                        "timestamp": datetime.fromtimestamp(pkt.time).isoformat(),
-                        "src_ip": src_ip,
-                        "dst_ip": dst_ip,
-                        "dst_port": dst_port,
-                        "payload": parsed_payload,
-                    }
+                        entry = {
+                            "timestamp": datetime.fromtimestamp(pkt.time).isoformat(),
+                            "src_ip": src_ip,
+                            "dst_ip": dst_ip,
+                            "dst_port": dst_port,
+                            "payload": parsed_payload,
+                        }
+                        
+                        # Almacenar en estructuras
+                        if len(analysis["comms"]) == 0:
+                            ip_role_mapping[src_ip] = {"host": "device", "port": ""}
+                            ip_role_mapping[dst_ip] = {"host": "gateway", "port": dst_port}
+                        
+                        # Determinar nombres basados en el mapeo
+                        src_data = ip_role_mapping.get(src_ip)
+                        if src_data:
+                            src_role = src_data.get("host", src_ip)
+                        
+                        dst_data = ip_role_mapping.get(dst_ip)
+                        if dst_data:
+                            dst_role = dst_data.get("host", dst_ip)
+                        
+                        
+                        if src_role == "gateway" and dst_role != "device":
+                            dst_role = "cloud"
+                            ip_role_mapping[dst_ip] = {"host": dst_role, "port": dst_port}
+                            
+                        # Construir estructura de datos
+                        comm_key = f"{src_role}->{dst_role}"
+                        
+                        if comm_key not in analysis["comms"]:
+                            analysis["comms"][comm_key] = []
 
-                    # Almacenar en estructuras
-                    leng = len(analysis["comms"]) > 0
-                    logger.info(f"entry = {entry} y leng = {leng}")
-                    if len(analysis["comms"]) == 0:
-                        temp = analysis["ip_role_mapping"]
-                        logger.info(f"ip_role_mapping = {temp}")
-
-                        analysis["ip_role_mapping"].update(
-                            {src_ip: "device", dst_ip: "gateway"}
-                        )
-                        temp = analysis["ip_role_mapping"]
-                        logger.info(f"DESPUÉS: ip_role_mapping = {temp}")
-                    
-                    # Determinar nombres basados en el mapeo
-                    src_role = analysis["ip_role_mapping"].get(src_ip, src_ip)
-                    dst_role = analysis["ip_role_mapping"].get(dst_ip, dst_ip)
-                    
-                    if src_role == "gateway" and dst_role != "device":
-                        dst_role = "cloud"
-                        analysis["ip_role_mapping"].update(
-                            {dst_ip: "cloud"}
-                        )
-                    # Construir estructura de datos
-                    comm_key = f"{src_role}->{dst_role}"
-                    
-                    if comm_key not in analysis["comms"]:
-                        analysis["comms"][comm_key] = []
-
-                    analysis["comms"][comm_key].append(entry)
-
-        analysis["comms"] = process_intercepted_data(analysis["comms"])
-        # Guardar análisis
-        analysis_file = f"{pcap_file}.analysis.json"
-        with open(analysis_file, "w") as f:
-            json.dump(analysis, f, indent=2)
-        logger.info(f"Análisis guardado en {analysis_file}")
-        return True
-
+                        analysis["comms"][comm_key].append(entry)
+        
+        if len(analysis["comms"]) > 0:          
+            analysis["ip_role_mapping"] = ip_role_mapping
+            analysis["comms"] = process_intercepted_data(analysis["comms"])
+            # Guardar análisis
+            analysis_file = f"{pcap_file}.analysis.json"
+            with open(analysis_file, "w") as f:
+                json.dump(analysis, f, indent=2)
+            logger.info(f"Análisis guardado en {analysis_file}")
+            return True
+        return False
     except Exception as e:
         logger.error(f"Error analizando {pcap_file}: {str(e)}")
         return False
@@ -174,9 +168,10 @@ def capture_loop():
                 else:
                     os.rename(pcap_file, f"{pcap_file}.error")
             else:
-                logger.warning("Captura vacía o no creada, reintentando...")
+                logger.warning("Captura vacía o no creada, reintentando.")
                 os.remove(pcap_file) if os.path.exists(pcap_file) else None
 
+            time.sleep(60)
         except Exception as e:
             logger.error(f"Error en bucle de captura: {str(e)}")
             time.sleep(10)

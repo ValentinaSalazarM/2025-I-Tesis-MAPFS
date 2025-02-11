@@ -1,13 +1,11 @@
 services:
-  mapfs-cloud:
+  skafs-cloud:
     build:
       context: ./IoT
-      dockerfile: ./cloud/MAPFS/Dockerfile
-    container_name: mapfs-cloud
+      dockerfile: ./cloud/SKAFS/Dockerfile
+    container_name: skafs-cloud
     networks:
-      - mapfs_network
-    depends_on:
-      - sniffer-capture
+      - skafs_network
     volumes:
       - ./Monitoreo/logs/cloud:/logs
     logging:
@@ -17,18 +15,18 @@ services:
     ports:
       - 8001:8001 #API
       - 8011:8011 #Prometheus
-      - 5001:5001 #Socket
-    command: [ "python", "-m", "cloud.mapfs_cloud" ]
+      - 5001:5001 #Socket Device
+    command: [ "python", "-m", "cloud.skafs_cloud" ]
 
-  mapfs-gateway:
+  skafs-gateway:
     build:
       context: ./IoT
-      dockerfile: ./gateway/MAPFS/Dockerfile
-    container_name: mapfs-gateway
+      dockerfile: ./gateway/SKAFS/Dockerfile
+    container_name: skafs-gateway
     depends_on:
-      - mapfs-cloud
+      - skafs-cloud
     networks:
-      - mapfs_network
+      - skafs_network
     volumes:
       - ./Monitoreo/logs/gateway:/logs
     logging:
@@ -38,17 +36,17 @@ services:
     ports:
       - 8010:8010 #Prometheus
       - 5000:5000 #Socket
-    command: [ "python", "-m", "gateway.mapfs_gateway" ]
+      - 6000:6000 #Socket revocation
+    command: [ "python", "-m", "gateway.skafs_gateway" ]
 
-  mapfs-device:
+  skafs-device:
     build:
       context: ./IoT
-      dockerfile: ./device/MAPFS/Dockerfile
-    container_name: mapfs-device
+      dockerfile: ./device/SKAFS/Dockerfile
     depends_on:
-      - mapfs-gateway
+      - skafs-gateway
     networks:
-      - mapfs_network
+      - skafs_network
     logging:
       driver: loki
       options:
@@ -57,7 +55,7 @@ services:
       - ./Monitoreo/logs/device:/logs
     ports:
       - 8012:8012 #Prometheus
-    command: [ "python", "-m", "device.mapfs_device" ]
+    command: [ "python", "-m", "device.skafs_device" ]
 
   sniffer-capture:
     build:
@@ -76,10 +74,8 @@ services:
     build:
       context: ./Sniffing
       dockerfile: Dockerfile.replicate
-    depends_on:
-      - sniffer-capture
     networks:
-      - mapfs_network
+      - skafs_network
     volumes:
       - ./Sniffing/shared_data:/shared_data  # Mismo volumen compartido
       - ./Sniffing/logs:/logs
@@ -88,7 +84,7 @@ services:
     restart: on-failure
 
 networks:
-  mapfs_network:
+  skafs_network:
     driver: bridge
 
 volumes:
