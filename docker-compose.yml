@@ -2,6 +2,8 @@ volumes:
   grafana-data:
   prometheus-data:    
   loki-data:
+  shared_data:  # Volumen compartido entre ambos sniffers
+    driver: local
 
 services:
   loki:
@@ -83,6 +85,35 @@ services:
     networks:
       - mapfs_network
 
+  locust:
+    image: locustio/locust
+    ports:
+      - "8089:8089"  # Interfaz web de Locust
+      - "5557:5557"  # Puerto para comunicación entre workers y master
+      - "5558:5558"
+    networks:
+      - mapfs_network
+    volumes:
+      - ./Sniffing/scripts/:/mnt/locust
+    command: >
+      -f /mnt/locust/load_tests.py --host mapfs-gateway --web-port 8089
+    environment:
+      - LOCUST_LOCUSTFILE=/mnt/locust/load_tests.py
+      - LOCUST_WEB_PORT=8089
+    depends_on:
+      - mapfs-gateway  # Espera a que el servidor de sockets esté listo
+
+  locust-metrics-exporter:
+    image: containersol/locust_exporter
+    ports:
+      - "9646:9646"
+    networks:
+      - mapfs_network
+    environment:
+      - LOCUST_EXPORTER_URI=http://locust:8089
+    depends_on:
+      - locust  # Espera a que Locust esté listo antes de iniciar
+
   mapfs-cloud:
     build:
       context: ./IoT
@@ -91,13 +122,12 @@ services:
     networks:
       - mapfs_network
     volumes:
-      - ./Monitoreo/logs/cloud:/logs
+      - ./Logs:/logs
     logging:
       driver: loki
       options:
         loki-url: "http://localhost:3100/loki/api/v1/push"  
     ports:
-      - 8001:8001 #API
       - 8011:8011 #Prometheus
       - 5001:5001 #Socket
     command: ["python", "-m", "cloud.mapfs_cloud"]
@@ -112,7 +142,7 @@ services:
     networks:
       - mapfs_network
     volumes:
-      - ./Monitoreo/logs/gateway:/logs
+      - ./Logs:/logs
     logging:
       driver: loki
       options:
@@ -136,10 +166,36 @@ services:
       options:
         loki-url: "http://localhost:3100/loki/api/v1/push"  
     volumes:
-      - ./Monitoreo/logs/device:/logs
+      - ./Logs:/logs
     ports:
       - 8012:8012 #Prometheus
     command: ["python", "-m", "device.mapfs_device"]
+
+  sniffer-capture:
+    build:
+      context: ./Sniffing
+      dockerfile: Dockerfile.capture
+    network_mode: host # Capturar tráfico del host
+    volumes:
+      - ./Sniffing/shared_data:/shared_data  # Volumen compartido
+      - ./Logs:/logs
+    cap_add:
+      - NET_ADMIN # Permiso para sniffing
+    command: [ "python", "-m", "capture_script" ]
+    restart: on-failure
+
+  sniffer-replicate:
+    build:
+      context: ./Sniffing
+      dockerfile: Dockerfile.replicate
+    networks:
+      - mapfs_network
+    volumes:
+      - ./Sniffing/shared_data:/shared_data  # Mismo volumen compartido
+      - ./Logs:/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["python", "-m", "replicate_script"]
+    restart: on-failure
 
 networks:
   mapfs_network:

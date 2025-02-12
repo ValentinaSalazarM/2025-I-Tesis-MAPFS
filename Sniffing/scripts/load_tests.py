@@ -2,6 +2,7 @@ import socket
 import json
 from locust import User, task, between, events
 import logging
+import os
 
 # Configuración del logger
 logger = logging.getLogger("locust")
@@ -38,10 +39,14 @@ class SocketUser(User):
     def mutual_authentication(self):
         try:
             # Paso 1: Enviar mensaje "hello" al gateway
+            value = {
+            "x": int.from_bytes(os.urandom(8), "big"),
+            "y": int.from_bytes(os.urandom(8), "big")
+            }
             hello_message = {
                 "operation": "mutual_authentication",
                 "step": "hello",
-                "device_id": "device_123",
+                "one_time_public_key": value
             }
             self.client.send(hello_message)
 
@@ -51,14 +56,14 @@ class SocketUser(User):
 
             # Paso 3: Enviar mensaje de autenticación del IoT
             iot_auth_token = {
-                "P_1": "value1",
-                "P_2": "value2",
-                "P_3": "value3",
-                "sigma_t": "value4",
-                "T_1": "value5",
-                "T_2": "value6",
-                "s_1": "value7",
-                "s_2": "value8",
+                "P_1": value,
+                "P_2": value,
+                "P_3": value,
+                "sigma_t": int.from_bytes(os.urandom(8), "big"),
+                "T_1": value,
+                "T_2": value,
+                "s_1": int.from_bytes(os.urandom(8), "big"),
+                "s_2": int.from_bytes(os.urandom(8), "big"),
             }
             self.client.send(iot_auth_token)
 

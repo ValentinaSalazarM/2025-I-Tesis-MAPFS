@@ -7,13 +7,12 @@ services:
     networks:
       - mapfs_network
     volumes:
-      - ./Monitoreo/logs/cloud:/logs
+      - ./Logs:/logs
     logging:
       driver: loki
       options:
         loki-url: "http://localhost:3100/loki/api/v1/push"
     ports:
-      - 8001:8001 #API
       - 8011:8011 #Prometheus
       - 5001:5001 #Socket Device
     command: [ "python", "-m", "cloud.mapfs_cloud" ]
@@ -28,7 +27,7 @@ services:
     networks:
       - mapfs_network
     volumes:
-      - ./Monitoreo/logs/gateway:/logs
+      - ./Logs:/logs
     logging:
       driver: loki
       options:
@@ -53,7 +52,7 @@ services:
       options:
         loki-url: "http://localhost:3100/loki/api/v1/push"
     volumes:
-      - ./Monitoreo/logs/device:/logs
+      - ./Logs:/logs
     ports:
       - 8012:8012 #Prometheus
     command: [ "python", "-m", "device.mapfs_device" ]
@@ -65,7 +64,7 @@ services:
     network_mode: host # Capturar tráfico del host
     volumes:
       - ./Sniffing/shared_data:/shared_data  # Volumen compartido
-      - ./Sniffing/logs:/logs
+      - ./Logs:/logs
     cap_add:
       - NET_ADMIN # Permiso para sniffing
     command: [ "python", "-m", "capture_script" ]
@@ -79,11 +78,11 @@ services:
       - mapfs_network
     volumes:
       - ./Sniffing/shared_data:/shared_data  # Mismo volumen compartido
-      - ./Sniffing/logs:/logs
+      - ./Logs:/logs
       - /var/run/docker.sock:/var/run/docker.sock
     command: ["python", "-m", "replicate_script"]
     restart: on-failure
-
+      
 networks:
   mapfs_network:
     driver: bridge

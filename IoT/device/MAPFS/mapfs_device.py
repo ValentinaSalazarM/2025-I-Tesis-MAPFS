@@ -352,8 +352,6 @@ def gateway_auth_on_IoT_side(gateway_auth_token, random_nonces, A_dict):
     # Almacenar los parámetros de autenticación
     authentication_parameters = {
         "session_key": K_s_bytes,
-        "P_1": P_1_dict,
-        "P_3": P_3_dict,
         "A": A_dict,
         "W": W_dict,
     }

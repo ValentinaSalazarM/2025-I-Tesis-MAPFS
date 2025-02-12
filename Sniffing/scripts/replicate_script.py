@@ -33,7 +33,6 @@ intercepted_parameters = {}
 ip_role_mapping = {}
 
 gateway_host_mapfs = "mapfs-gateway"
-gateway_host_skafs = "skafs-gateway"
 
 def find_analysis_files():
     """Busca archivos de análisis no procesados con tamaño mayor a 1KB"""
@@ -330,16 +329,16 @@ def user_menu():
             logger.info(f"Archivo seleccionado: {current_file}")
 
         extract_parameters_from_analysis()
-        choice = "3"
+        choice = "1"
         state = False
         
         if choice == "1":
             direction = "device->gateway"
             state = replicate_authentication(direction, gateway_host_mapfs)
         elif choice == "2":
-            state = replicate_revocation()
-        elif choice == "3":
             state = replicate_send_metrics()
+        elif choice == "3":
+            state = replicate_revocation()
         elif choice == "4":
             current_file = ""  # Limpiar el archivo actual para buscar otro
         elif choice == "5":

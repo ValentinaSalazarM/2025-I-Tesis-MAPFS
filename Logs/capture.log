@@ -1,0 +1,10 @@
+2025-02-11 03:06:59,866 - INFO - Iniciando captura: /shared_data/capture_20250211-030659.pcap
+2025-02-11 03:07:29,990 - INFO - Captura finalizada: /shared_data/capture_20250211-030659.pcap
+2025-02-11 03:07:31,930 - INFO - Análisis guardado en /shared_data/capture_20250211-030659.pcap.analysis.json
+2025-02-11 03:08:31,932 - INFO - Iniciando captura: /shared_data/capture_20250211-030831.pcap
+2025-02-11 03:09:02,046 - INFO - Captura finalizada: /shared_data/capture_20250211-030831.pcap
+2025-02-11 03:09:03,648 - INFO - Análisis guardado en /shared_data/capture_20250211-030831.pcap.analysis.json
+2025-02-11 03:10:03,675 - INFO - Iniciando captura: /shared_data/capture_20250211-031003.pcap
+2025-02-11 03:10:33,781 - INFO - Captura finalizada: /shared_data/capture_20250211-031003.pcap
+2025-02-11 03:11:35,868 - INFO - Iniciando captura: /shared_data/capture_20250211-031135.pcap
+2025-02-11 03:12:06,037 - INFO - Captura finalizada: /shared_data/capture_20250211-031135.pcap
