@@ -1,11 +1,16 @@
 import socket
 import json
-from locust import User, task, between, events
 import logging
+import time
 import os
+
+from locust import User, task, between, events
+from fastecdsa import keys
+from fastecdsa.curve import Curve, P256
 
 # Configuración del logger
 logger = logging.getLogger("locust")
+
 
 class SocketClient:
     def __init__(self, host, port):
@@ -26,6 +31,7 @@ class SocketClient:
     def close(self):
         self.socket.close()
 
+
 class SocketUser(User):
     wait_time = between(1, 5)
     host = "localhost"
@@ -39,22 +45,29 @@ class SocketUser(User):
     def mutual_authentication(self):
         try:
             # Paso 1: Enviar mensaje "hello" al gateway
-            value = {
-            "x": int.from_bytes(os.urandom(8), "big"),
-            "y": int.from_bytes(os.urandom(8), "big")
-            }
+            step_start = time.time()
+            _, random_pub_key = keys.gen_keypair(P256)
+            value = {"x": random_pub_key.x, "y": random_pub_key.y}
             hello_message = {
                 "operation": "mutual_authentication",
                 "step": "hello",
-                "one_time_public_key": value
+                "one_time_public_key": value,
             }
             self.client.send(hello_message)
 
             # Paso 2: Recibir token de autenticación del gateway
             gateway_token = self.client.receive()
+            events.request.fire(
+                request_type="socket",
+                name="mutual_auth/hello",
+                response_time=(time.time() - step_start)*1000,
+                response_length=len(str(gateway_token)),
+                exception=None,
+            )
             logger.info("Token recibido: %s", gateway_token)
 
             # Paso 3: Enviar mensaje de autenticación del IoT
+            step_start = time.time()
             iot_auth_token = {
                 "P_1": value,
                 "P_2": value,
@@ -69,16 +82,15 @@ class SocketUser(User):
 
             # Paso 4: Recibir respuesta final del gateway
             response = self.client.receive()
-            logger.info("Respuesta final: %s", response)
-
-            # Registrar la solicitud como exitosa
             events.request.fire(
                 request_type="socket",
-                name="mutual_authentication",
-                response_time=100,  # Tiempo de respuesta en ms (puedes calcularlo)
+                name="mutual_auth/iot_auth",
+                response_time=(time.time() - step_start)*1000,
                 response_length=len(str(response)),
                 exception=None,
             )
+            logger.info("Respuesta final: %s", response)
+            
         except Exception as e:
             # Registrar la solicitud como fallida
             logger.error("Error durante la autenticación: %s", e)

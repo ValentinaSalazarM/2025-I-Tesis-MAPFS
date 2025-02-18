@@ -174,8 +174,9 @@ def mutual_authentication():
         first_response = send_and_receive_persistent_socket(first_request)
         logger.info(f"[AUTH] Mensaje 'hello' enviado al Gateway {first_request}.")
         if first_response.get("status") == "failed" or first_response.get("status") == "error":
+            error_message = first_response.get("message")
             raise PermissionError(
-                "El proceso de autenticación ha sido detenido por el Gateway."
+                f"El proceso de autenticación ha sido detenido por el Gateway: {error_message}" 
             )
         
         # Paso 2: Procesar el token de autenticación del gateway (W, ID_w, X_w_pub_key, Y_w_pub_key, sigma_z)
@@ -208,8 +209,9 @@ def mutual_authentication():
         )
         second_response = send_and_receive_persistent_socket(second_request)
         if second_response.get("status") == "failed" or first_response.get("status") == "error":
+            error_message = second_response.get("message")
             raise PermissionError(
-                "El proceso de autenticación ha sido detenido por el Gateway."
+                f"El proceso de autenticación ha sido detenido por el Gateway: {error_message}" 
             )
         else:
             logger.info("[AUTH] Autenticación mutua culminada.")
@@ -422,17 +424,16 @@ def send_encrypted_metrics():
 
                     # Recibir respuesta del Gateway
                     response = sock.recv(4096)
-                    if response:
-                        response_message = json.loads(response.decode("utf-8"))
-                        logger.info(
-                            f"[METRICS] Respuesta recibida del Gateway: {response_message}"
-                        )
+                    response_message = json.loads(response.decode("utf-8"))
+                    logger.info(
+                        f"[METRICS] Respuesta recibida del Gateway: response_message = {response_message}"
+                    )
 
-                        # Si el dispositivo no se encuentra autenticado, detener envío de métricas
-                        if response.get("status") == "failed" or response.get("status") == "error":
-                            raise PermissionError(
-                                "Dispositivo no autenticado. Deteniendo envío de métricas."
-                            )
+                    # Si el dispositivo no se encuentra autenticado, detener envío de métricas
+                    if response_message.get("status") == "failed" or response_message.get("status") == "error":
+                        raise PermissionError(
+                            "Dispositivo no autenticado. Deteniendo envío de métricas."
+                        )
 
                 except socket.error as e:
                     logger.error(f"[METRICS] Error de comunicación con el Gateway: {e}")
@@ -528,6 +529,7 @@ def send_and_receive_persistent_socket(message_dict):
 
 if __name__ == "__main__":
     time.sleep(15)
+    
     # Inicia el servidor de métricas Prometheus
     logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8012.")
     start_http_server(8012)
@@ -536,4 +538,4 @@ if __name__ == "__main__":
     # Simula el envío de métricas al Gateway
     mutual_authentication()
     
-    #send_encrypted_metrics()
+    send_encrypted_metrics()

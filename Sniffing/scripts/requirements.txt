@@ -1,4 +1,7 @@
 scapy
+ecdsa
+fastecdsa
 python-dateutil
 pycryptodome
-locust
+locust-plugins
+python-dotenv
