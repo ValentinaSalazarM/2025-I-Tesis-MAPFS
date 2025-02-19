@@ -125,7 +125,7 @@ def IoT_registration():
                 "h_a": h_a,
             }
             logger.info(
-                f"[REG] Registro completado exitosamente con los siguientes parámetros: {registration_parameters}"
+                f"[REG] Registro completado exitosamente."
             )
     except KeyError as e:
         logger.error(f"[REG] Clave faltante: {e}")

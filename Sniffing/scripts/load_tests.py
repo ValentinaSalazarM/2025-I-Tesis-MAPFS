@@ -6,7 +6,7 @@ import os
 
 from locust import User, task, between, events
 from fastecdsa import keys
-from fastecdsa.curve import Curve, P256
+from fastecdsa.curve import P256
 
 # Configuración del logger
 logger = logging.getLogger("locust")

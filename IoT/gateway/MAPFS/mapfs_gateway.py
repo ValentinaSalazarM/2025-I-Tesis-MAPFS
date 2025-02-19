@@ -169,7 +169,7 @@ def gateway_registration():
             "h_w": h_w,
         }
         logger.info(
-            f"[REG] Registro completado exitosamente con los siguientes parámetros: {registration_parameters}"
+            f"[REG] Registro completado exitosamente con los siguientes parámetros."
         )
     except socket.error as e:
         logger.error(f"[REG] Error de comunicación con el CA: {e}")
@@ -401,31 +401,32 @@ def handle_send_metrics(client_socket, message):
 
         # Verificar si el dispositivo está autenticado
         authentication_parameters = authenticated_devices.get(authentication_id)
-        if not authentication_parameters:
+
+        # Verificar si el dispositivo está revocado
+        if authentication_parameters:
+            P_1_dict = authentication_parameters.get("P_1")
+            P_3_dict = authentication_parameters.get("P_3")
+
+            if not P_1_dict or not P_3_dict:
+                raise ValueError(f"Faltan parámetros P_1 y P_3 para verificar revocación.")
+
+            if is_device_revoked(P_1_dict, P_3_dict):
+                logger.warning(
+                    f"[METRICS] Dispositivo revocado intentó enviar métricas. Bloqueando acceso."
+                )
+                response = {
+                    "status": "failed",
+                    "message": "Dispositivo revocado. No se aceptan métricas.",
+                }
+                client_socket.sendall(json.dumps(response).encode("utf-8"))
+                raise ValueError("Dispositivo revocado.")
+        else:
             response = {
                 "status": "failed",
                 "message": "Dispositivo no autenticado. No se aceptan métricas.",
             }
             client_socket.sendall(json.dumps(response).encode("utf-8"))
             raise ValueError(f"Dispositivo con ID: {authentication_id} no autenticado.")
-
-        # Verificar si el dispositivo está revocado
-        P_1_dict = authentication_parameters.get("P_1")
-        P_3_dict = authentication_parameters.get("P_3")
-
-        if not P_1_dict or not P_3_dict:
-            raise ValueError(f"Faltan parámetros P_1 y P_3 para verificar revocación.")
-
-        if is_device_revoked(P_1_dict, P_3_dict):
-            logger.warning(
-                f"[METRICS] Dispositivo revocado intentó enviar métricas. Bloqueando acceso."
-            )
-            response = {
-                "status": "failed",
-                "message": "Dispositivo revocado. No se aceptan métricas.",
-            }
-            client_socket.sendall(json.dumps(response).encode("utf-8"))
-            raise ValueError("Dispositivo revocado.")
 
         # Extraer métricas cifradas
         iv_base64 = message.get("iv")
@@ -696,7 +697,8 @@ def send_and_receive_persistent_socket(message_dict):
 
 if __name__ == "__main__":
     time.sleep(10)
-
+    os.makedirs("../../Logs/", mode=0o777, exist_ok=True)
+    
     # Iniciar el servidor de métricas Prometheus
     logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8010.")
     start_http_server(8010)

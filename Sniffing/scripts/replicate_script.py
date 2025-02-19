@@ -5,7 +5,10 @@ import socket
 import logging
 import base64
 import random
-import base64
+
+from fastecdsa import keys
+from fastecdsa.curve import P256
+
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 from Crypto import Random
@@ -181,17 +184,27 @@ def replicate_authentication(direction, gateway_host):
         return False
 
 
-def replicate_revocation():
+def replicate_revocation(using_intercepted_parameters):
     """Envía una solicitud de revocación al Cloud con los parámetros P1 y P3."""
     global intercepted_parameters, ip_role_mapping
-    logger.info(f"Envía una solicitud de revocación al Cloud.")
     try:
+        logger.info(f"Envíando una solicitud de revocación al Cloud con datos legítimos.")
         # Crear el payload de revocación
-        payload = {
-            "operation": "identify_and_revoke",
-            "P_1": intercepted_parameters.get("device").get("P_1"),
-            "P_3": intercepted_parameters.get("device").get("P_3"),
-        }
+        if using_intercepted_parameters:
+            payload = {
+                "operation": "identify_and_revoke",
+                "P_1": intercepted_parameters.get("device").get("P_1"),
+                "P_3": intercepted_parameters.get("device").get("P_3"),
+            }
+        else:
+            logger.info(f"Envíando una solicitud de revocación al Cloud con datos aleatorios.")
+            _, random_pub_key = keys.gen_keypair(P256)
+            value = {"x": random_pub_key.x, "y": random_pub_key.y}
+            payload = {
+                "operation": "identify_and_revoke",
+                "P_1": value,
+                "P_3": value,
+            }
 
         # Recorrer el diccionario
         for ip, data in ip_role_mapping.items():
@@ -329,7 +342,7 @@ def user_menu():
             logger.info(f"Archivo seleccionado: {current_file}")
 
         extract_parameters_from_analysis()
-        choice = "1"
+        choice = "4"
         state = False
         
         if choice == "1":
@@ -338,9 +351,9 @@ def user_menu():
         elif choice == "2":
             state = replicate_send_metrics()
         elif choice == "3":
-            state = replicate_revocation()
+            state = replicate_revocation(True)
         elif choice == "4":
-            current_file = ""  # Limpiar el archivo actual para buscar otro
+            state = replicate_revocation(False)  
         elif choice == "5":
             logger.info("Saliendo del servicio.")
             
@@ -352,7 +365,7 @@ def user_menu():
 
 if __name__ == "__main__":
     # Verificar y crear directorios necesarios
+    os.makedirs("../../Logs/", mode=0o777, exist_ok=True)
     os.makedirs(SHARED_DIR, exist_ok=True)
-
     logger.info("Iniciando servicio de replicación.")
     user_menu()
