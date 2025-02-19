@@ -11,7 +11,7 @@ import os
 # Configuración del logger
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
+    format="time=%(asctime)s level=%(levelname)s msg=\'%(message)s\'",
     handlers=[logging.FileHandler("/logs/capture.log"), logging.StreamHandler()],
 )
 logger = logging.getLogger("Sniffer-Capture")

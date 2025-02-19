@@ -7,7 +7,7 @@ from prometheus_client import start_http_server, Counter
 # Configuración del logger
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
+    format="time=%(asctime)s level=%(levelname)s msg=\'%(message)s\'",
     handlers=[logging.FileHandler("/logs/MAPFS-gateway.log"), logging.StreamHandler()],
 )
 logger = logging.getLogger("Gateway")
@@ -141,7 +141,7 @@ def gateway_registration():
             "Gateway_Identity": gateway_identity,
             "X_w_pub_key": X_w_pub_key_dict,
         }
-        logger.info(f"[REG] Enviada información de registro al CA {second_payload}.")
+        logger.info(f"[REG] Enviada información de registro al CA: {second_payload}.")
 
         # Paso 3: Recibir sigma_a, Y_a_pub_key, h_a
         second_response = send_and_receive_persistent_socket(second_payload)

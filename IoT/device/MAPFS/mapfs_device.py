@@ -6,7 +6,7 @@ from prometheus_client import start_http_server, Counter, Histogram
 # Configuración del logger
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
+    format="time=%(asctime)s level=%(levelname)s msg=%(message)s",
     handlers=[logging.FileHandler("/logs/MAPFS-device.log"), logging.StreamHandler()],
 )
 logger = logging.getLogger("Device")
