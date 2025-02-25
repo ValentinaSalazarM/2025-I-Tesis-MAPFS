@@ -1,7 +1,7 @@
-import socket
-import json
 import logging
+import socket
 import time
+import json
 import os
 
 from locust import User, task, between, events
@@ -9,9 +9,9 @@ from fastecdsa import keys
 from fastecdsa.curve import P256
 
 # Configuración del logger
-logger = logging.getLogger("locust")
+logger = logging.getLogger("Locust")
 
-
+logger.info("Iniciando Locust y configuración de logging.")
 class SocketClient:
     def __init__(self, host, port):
         self.host = host
@@ -25,8 +25,13 @@ class SocketClient:
         self.socket.sendall(json.dumps(message).encode("utf-8"))
 
     def receive(self):
-        data = self.socket.recv(4096)
-        return json.loads(data.decode("utf-8"))
+        self.socket.settimeout(5)  # Timeout de 5 segundos
+        try:
+            data = self.socket.recv(4096)
+            return json.loads(data.decode("utf-8"))
+        except socket.timeout:
+            logger.error("Timeout esperando respuesta del gateway.")
+            return {"error": "timeout"}
 
     def close(self):
         self.socket.close()
@@ -43,6 +48,7 @@ class SocketUser(User):
 
     @task
     def mutual_authentication(self):
+        logger.info("Ejecutando un ataque de DoS al servicio de autenticación.")
         try:
             # Paso 1: Enviar mensaje "hello" al gateway
             step_start = time.time()

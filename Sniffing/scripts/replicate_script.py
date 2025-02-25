@@ -17,8 +17,8 @@ from Crypto import Random
 # Configuración del logger
 logging.basicConfig(
     level=logging.INFO,
-    format="time=%(asctime)s level=%(levelname)s msg=\'%(message)s\'",
-    handlers=[logging.FileHandler("/logs/replicate.log"), logging.StreamHandler()],
+    format="MAPFS time=%(asctime)s level=%(levelname)s msg=\'%(message)s\'",
+    handlers=[logging.FileHandler("/logs/ATTACK-replicate.log"), logging.StreamHandler()],
 )
 logger = logging.getLogger("Sniffer-Replicate")
 

@@ -7,12 +7,11 @@ import time
 import json
 import os
 
-
 # Configuración del logger
 logging.basicConfig(
     level=logging.INFO,
-    format="time=%(asctime)s level=%(levelname)s msg=\'%(message)s\'",
-    handlers=[logging.FileHandler("/logs/capture.log"), logging.StreamHandler()],
+    format="MAPFS time=%(asctime)s level=%(levelname)s msg=\'%(message)s\'",
+    handlers=[logging.FileHandler("/logs/ATTACK-capture.log"), logging.StreamHandler()],
 )
 logger = logging.getLogger("Sniffer-Capture")
 

@@ -1,5 +1,0 @@
-time=2025-02-19 17:05:18,238 level=INFO msg='Iniciando captura: /shared_data/capture_20250219-170518.pcap'
-time=2025-02-19 17:05:48,351 level=INFO msg='Captura finalizada: /shared_data/capture_20250219-170518.pcap'
-time=2025-02-19 17:05:50,601 level=INFO msg='Análisis guardado en /shared_data/capture_20250219-170518.pcap.analysis.json'
-time=2025-02-19 17:06:50,606 level=INFO msg='Iniciando captura: /shared_data/capture_20250219-170650.pcap'
-time=2025-02-19 17:07:20,755 level=INFO msg='Captura finalizada: /shared_data/capture_20250219-170650.pcap'

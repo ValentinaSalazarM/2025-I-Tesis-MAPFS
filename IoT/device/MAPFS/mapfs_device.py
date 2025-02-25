@@ -6,7 +6,7 @@ from prometheus_client import start_http_server, Counter, Histogram
 # Configuración del logger
 logging.basicConfig(
     level=logging.INFO,
-    format="time=%(asctime)s level=%(levelname)s msg=%(message)s",
+    format="MAPFS time=%(asctime)s level=%(levelname)s msg=%(message)s",
     handlers=[logging.FileHandler("/logs/MAPFS-device.log"), logging.StreamHandler()],
 )
 logger = logging.getLogger("Device")
@@ -124,9 +124,7 @@ def IoT_registration():
                 "sigma_a": sigma_a,
                 "h_a": h_a,
             }
-            logger.info(
-                f"[REG] Registro completado exitosamente."
-            )
+            logger.info(f"[REG] Registro completado exitosamente.")
     except KeyError as e:
         logger.error(f"[REG] Clave faltante: {e}")
     except socket.error as e:
@@ -173,12 +171,15 @@ def mutual_authentication():
         }
         first_response = send_and_receive_persistent_socket(first_request)
         logger.info(f"[AUTH] Mensaje 'hello' enviado al Gateway {first_request}.")
-        if first_response.get("status") == "failed" or first_response.get("status") == "error":
+        if (
+            first_response.get("status") == "failed"
+            or first_response.get("status") == "error"
+        ):
             error_message = first_response.get("message")
             raise PermissionError(
-                f"El proceso de autenticación ha sido detenido por el Gateway: {error_message}" 
+                f"El proceso de autenticación ha sido detenido por el Gateway: {error_message}"
             )
-        
+
         # Paso 2: Procesar el token de autenticación del gateway (W, ID_w, X_w_pub_key, Y_w_pub_key, sigma_z)
         if not all(
             key in first_response
@@ -208,10 +209,13 @@ def mutual_authentication():
             f"[AUTH] Puntos, compromisos y respuestas ZKP enviadas al gateway: {second_request}"
         )
         second_response = send_and_receive_persistent_socket(second_request)
-        if second_response.get("status") == "failed" or first_response.get("status") == "error":
+        if (
+            second_response.get("status") == "failed"
+            or first_response.get("status") == "error"
+        ):
             error_message = second_response.get("message")
             raise PermissionError(
-                f"El proceso de autenticación ha sido detenido por el Gateway: {error_message}" 
+                f"El proceso de autenticación ha sido detenido por el Gateway: {error_message}"
             )
         else:
             logger.info("[AUTH] Autenticación mutua culminada.")
@@ -430,7 +434,10 @@ def send_encrypted_metrics():
                     )
 
                     # Si el dispositivo no se encuentra autenticado, detener envío de métricas
-                    if response_message.get("status") == "failed" or response_message.get("status") == "error":
+                    if (
+                        response_message.get("status") == "failed"
+                        or response_message.get("status") == "error"
+                    ):
                         raise PermissionError(
                             "Dispositivo no autenticado. Deteniendo envío de métricas."
                         )
@@ -529,7 +536,7 @@ def send_and_receive_persistent_socket(message_dict):
 
 if __name__ == "__main__":
     time.sleep(15)
-    
+
     # Inicia el servidor de métricas Prometheus
     logger.info("Iniciando el servidor de métricas de Prometheus en el puerto 8012.")
     start_http_server(8012)
@@ -537,5 +544,5 @@ if __name__ == "__main__":
     IoT_registration()
     # Simula el envío de métricas al Gateway
     mutual_authentication()
-    
+
     send_encrypted_metrics()

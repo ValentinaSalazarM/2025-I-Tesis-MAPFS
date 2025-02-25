@@ -7,7 +7,7 @@ from prometheus_client import start_http_server, Counter
 # Configuración del logger
 logging.basicConfig(
     level=logging.INFO,
-    format="time=%(asctime)s level=%(levelname)s msg=\'%(message)s\'",
+    format="MAPFS time=%(asctime)s level=%(levelname)s msg=\'%(message)s\'",
     handlers=[logging.FileHandler("/logs/MAPFS-gateway.log"), logging.StreamHandler()],
 )
 logger = logging.getLogger("Gateway")

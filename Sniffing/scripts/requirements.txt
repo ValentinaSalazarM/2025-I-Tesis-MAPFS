@@ -1,7 +1,4 @@
-scapy
-ecdsa
-fastecdsa
-python-dateutil
-pycryptodome
-locust-plugins
-python-dotenv
+locust==2.32.10
+fastecdsa==3.0.1
+scapy==2.6.1
+pycryptodome==3.21.0

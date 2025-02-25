@@ -105,7 +105,7 @@ services:
       - LOCUST_WEB_PORT=8089
     depends_on:
       - mapfs-gateway
-
+    
   locust-metrics-exporter:
     image: containersol/locust_exporter
     ports:

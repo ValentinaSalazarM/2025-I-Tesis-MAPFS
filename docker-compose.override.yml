@@ -1,0 +1,17 @@
+services:
+  loki:
+    profiles: ["delayed"]
+  grafana:
+    profiles: ["delayed"]
+  prometheus:
+    profiles: ["delayed"]
+  node_exporter:
+    profiles: ["delayed"]
+  cadvisor:
+    profiles: ["delayed"]
+  locust:
+    profiles: ["delayed"]
+  locust-metrics-exporter:
+    profiles: ["delayed"]
+  sniffer-replicate:
+    profiles: ["delayed"]
