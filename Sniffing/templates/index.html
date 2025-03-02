@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Menú de Usuario</title>
+</head>
+<body>
+    <h1>Seleccione una acción</h1>
+    <form method="post">
+        <button type="submit" name="choice" value="1">Autenticación Device → Gateway</button>
+        <button type="submit" name="choice" value="2">Replicar envío de métricas</button>
+        <button type="submit" name="choice" value="3">Revocación forzada</button>
+        <button type="submit" name="choice" value="4">Revocación normal</button>
+        <button type="submit" name="choice" value="5">Salir</button>
+    </form>
+    {% if message %}
+        <p>{{ message }}</p>
+    {% endif %}
+</body>
+</html>

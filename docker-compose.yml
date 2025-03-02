@@ -137,6 +137,11 @@ services:
       - 8011:8011 #Prometheus
       - 5001:5001 #Socket
     command: ["python", "-m", "cloud.mapfs_cloud"]
+    deploy:
+      resources:
+        limits:
+          cpus: '0.4'
+          memory: 10M
 
   mapfs-gateway:
     build:
@@ -158,6 +163,11 @@ services:
       - 5000:5000 #Socket
       - 6000:6000 #Socket revocation
     command: ["python", "-m", "gateway.mapfs_gateway"]
+    deploy:
+      resources:
+        limits:
+          cpus: '0.4'
+          memory: 10M
   
   mapfs-device:
     build:
@@ -176,6 +186,11 @@ services:
     ports:
       - 8012:8012 #Prometheus
     command: ["python", "-m", "device.mapfs_device"]
+    deploy:
+      resources:
+        limits:
+          cpus: '0.4'
+          memory: 10M
 
   sniffer-capture:
     build:
@@ -200,7 +215,9 @@ services:
       - ./Sniffing/shared_data:/shared_data  # Mismo volumen compartido
       - ./Logs:/logs
       - /var/run/docker.sock:/var/run/docker.sock
-    command: ["python", "-m", "replicate_script"]
+    ports:
+      - "8000:8000"  # Exponer el puerto de FastAPI
+    command: ["uvicorn", "replicate_script:app", "--host", "0.0.0.0", "--port", "8000"]
     restart: on-failure
 
 networks:

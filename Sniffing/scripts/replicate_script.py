@@ -13,6 +13,9 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 from Crypto import Random
 
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+import uvicorn
 
 # Configuración del logger
 logging.basicConfig(
@@ -22,7 +25,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("Sniffer-Replicate")
 
-# Configuración
+# Configurar FastAPI
+app = FastAPI()
+
+# Configuración volumen
 SHARED_DIR = "/shared_data"
 PROCESSED_DIR = os.path.join(SHARED_DIR, "processed")
 POLL_INTERVAL = 120  # Segundos entre verificaciones de nuevos archivos
@@ -325,47 +331,41 @@ def mark_file_as_processed(success=True):
     except Exception as e:
         logger.error(f"Error marcando archivo: {str(e)}")
 
+# Modelo de entrada
+class ChoiceRequest(BaseModel):
+    choice: str
 
-def user_menu():
-    """Menú interactivo para seleccionar una acción."""
+@app.post("/execute")
+def execute_choice(request: ChoiceRequest):
+    """Ejecuta la acción seleccionada por el usuario."""
     global current_file
-    while True:
-        if not current_file:
-            logger.info("No hay un archivo seleccionado. Buscando archivos.")
-            files = find_analysis_files()
-            if not files:
-                logger.info("No se encontraron archivos de análisis. Esperando.")
-                time.sleep(POLL_INTERVAL)
-                continue
+    choice = request.choice
+    state = False
 
+    if not current_file:
+        files = find_analysis_files()
+        if files:
             current_file = os.path.join(SHARED_DIR, files[0])
             logger.info(f"Archivo seleccionado: {current_file}")
+            extract_parameters_from_analysis()
 
-        extract_parameters_from_analysis()
-        choice = "4"
-        state = False
-        
-        if choice == "1":
-            direction = "device->gateway"
-            state = replicate_authentication(direction, gateway_host_mapfs)
-        elif choice == "2":
-            state = replicate_send_metrics()
-        elif choice == "3":
-            state = replicate_revocation(True)
-        elif choice == "4":
-            state = replicate_revocation(False)  
-        elif choice == "5":
-            logger.info("Saliendo del servicio.")
-            
-        if not state:
-            logger.info(f"El ataque no ha sido exitoso.")    
-        
-        current_file = ""
-        time.sleep(POLL_INTERVAL)
+    if choice == "1":
+        state = replicate_authentication("device->gateway", gateway_host_mapfs)
+    elif choice == "2":
+        state = replicate_send_metrics()
+    elif choice == "3":
+        state = replicate_revocation(True)
+    elif choice == "4":
+        state = replicate_revocation(False)
+    elif choice == "5":
+        return {"message": "Saliendo del servicio."}
 
+    message = "El ataque fue exitoso." if state else "El ataque no ha sido exitoso."
+    return {"message": message}
+
+# Iniciar servicio al ejecutar
 if __name__ == "__main__":
-    # Verificar y crear directorios necesarios
     os.makedirs("../../Logs/", mode=0o777, exist_ok=True)
     os.makedirs(SHARED_DIR, exist_ok=True)
     logger.info("Iniciando servicio de replicación.")
-    user_menu()
+    uvicorn.run(app, host="0.0.0.0", port=8000)
