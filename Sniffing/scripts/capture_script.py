@@ -178,6 +178,7 @@ def capture_loop():
 
 if __name__ == "__main__":
     # Verificar y crear directorios necesarios
+    time.sleep(5)
     os.makedirs("../../Logs/", mode=0o777, exist_ok=True)
     os.makedirs(SHARED_DIR, exist_ok=True)
     capture_loop()

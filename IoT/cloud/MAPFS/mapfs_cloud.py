@@ -66,28 +66,25 @@ def handle_client_connection(client_socket):
     try:
         # Recibir datos del cliente
         data = client_socket.recv(4096)
-        if not data:
-            logger.error("No se recibieron datos del cliente.")
-            return
+        if data:
+            # Decodificar el mensaje
+            message = decode_message(json.loads(data.decode("utf-8")))
+            logger.info(f"Mensaje recibido: {message}")
 
-        # Decodificar el mensaje
-        message = decode_message(json.loads(data.decode("utf-8")))
-        logger.info(f"Mensaje recibido: {message}")
+            # Verificar el tipo de operación
+            operation = message.get("operation")
+            if not operation:
+                raise ValueError("Falta el campo 'operation' en el mensaje recibido.")
 
-        # Verificar el tipo de operación
-        operation = message.get("operation")
-        if not operation:
-            raise ValueError("Falta el campo 'operation' en el mensaje recibido.")
-
-        # Redirigir a la función correspondiente
-        if operation == "register_gateway":
-            handle_gateway_registration(client_socket)
-        elif operation == "register_device":
-            handle_IoT_registration(client_socket)
-        elif operation == "identify_and_revoke":
-            handle_id_revocation(client_socket, message)
-        else:
-            raise ValueError(f"Operación desconocida: {operation}")
+            # Redirigir a la función correspondiente
+            if operation == "register_gateway":
+                handle_gateway_registration(client_socket)
+            elif operation == "register_device":
+                handle_IoT_registration(client_socket)
+            elif operation == "identify_and_revoke":
+                handle_id_revocation(client_socket, message)
+            else:
+                raise ValueError(f"Operación desconocida: {operation}")
 
     except ValueError as e:
         logger.error(f"Error en el mensaje recibido: {e}")
@@ -190,7 +187,6 @@ def handle_IoT_registration(client_socket):
         encoded_response = encode_message(response)
         client_socket.sendall(json.dumps(encoded_response).encode("utf-8"))
         logger.info("[REG Dispositivo] Respuesta enviada al dispositivo IoT.")
-
     except KeyError as e:
         logger.error(f"Clave faltante en los datos del dispositivo IoT: {e}")
         response = {"status": "error", "message": str(e)}
@@ -220,7 +216,7 @@ def handle_gateway_registration(client_socket):
     global registered_gateways, payload_public_keys, Pub_gc_key_xValue, Pub_gc_key_yValue, P_IoT_key_xValue, P_IoT_key_yValue
 
     try:
-        client_ip, client_port = client_socket.getpeername()
+        client_ip, _ = client_socket.getpeername()
 
         # Enviar parámetros públicos al gateway
         payload_public_keys["operation"] = "register"
@@ -294,7 +290,6 @@ def handle_gateway_registration(client_socket):
         encoded_response = encode_message(response)
         client_socket.sendall(json.dumps(encoded_response).encode("utf-8"))
         logger.info("[REG Gateway] Respuesta enviada al gateway.")
-
     except KeyError as e:
         logger.error(f"Clave faltante en los datos del Gateway: {e}")
         response = {"status": "error", "message": str(e)}

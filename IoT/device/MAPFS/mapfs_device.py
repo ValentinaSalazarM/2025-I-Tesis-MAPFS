@@ -542,7 +542,6 @@ if __name__ == "__main__":
     start_http_server(8012)
     # Realiza el registro y la autenticación mutua
     IoT_registration()
-    # Simula el envío de métricas al Gateway
     mutual_authentication()
-
+    # Simula el envío de métricas al Gateway
     send_encrypted_metrics()
