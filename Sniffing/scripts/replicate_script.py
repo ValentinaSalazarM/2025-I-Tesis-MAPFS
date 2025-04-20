@@ -194,16 +194,16 @@ def replicate_revocation(using_intercepted_parameters):
     """Envía una solicitud de revocación al Cloud con los parámetros P1 y P3."""
     global intercepted_parameters, ip_role_mapping
     try:
-        logger.info(f"Envíando una solicitud de revocación al Cloud con datos legítimos.")
         # Crear el payload de revocación
         if using_intercepted_parameters:
+            logger.info(f"Envíando una solicitud de revocación al Cloud con datos legítimos de P_1 y P_3.")
             payload = {
                 "operation": "identify_and_revoke",
                 "P_1": intercepted_parameters.get("device").get("P_1"),
                 "P_3": intercepted_parameters.get("device").get("P_3"),
             }
         else:
-            logger.info(f"Envíando una solicitud de revocación al Cloud con datos aleatorios.")
+            logger.info(f"Envíando una solicitud de revocación al Cloud con datos aleatorios de P_1 y P_3 (puntos en la curva elíptica).")
             _, random_pub_key = keys.gen_keypair(P256)
             value = {"x": random_pub_key.x, "y": random_pub_key.y}
             payload = {
@@ -343,6 +343,7 @@ def execute_choice(request: ChoiceRequest):
     state = False
 
     if not current_file:
+        logger.info("No hay un archivo seleccionado. Buscando archivos.")
         files = find_analysis_files()
         if files:
             current_file = os.path.join(SHARED_DIR, files[0])
@@ -368,4 +369,6 @@ if __name__ == "__main__":
     os.makedirs("../../Logs/", mode=0o777, exist_ok=True)
     os.makedirs(SHARED_DIR, exist_ok=True)
     logger.info("Iniciando servicio de replicación.")
+    
+    # Iniciar interfaz gráfica para que el usuario seleccione el ataque de su interés
     uvicorn.run(app, host="0.0.0.0", port=8000)
