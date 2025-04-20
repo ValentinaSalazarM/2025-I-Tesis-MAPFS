@@ -53,7 +53,6 @@ def find_analysis_files():
         for f in os.listdir(SHARED_DIR)
         if f.endswith(".analysis.json")
         and not f.endswith(".processed")
-        and not f.endswith(".failed")
         and os.path.getsize(os.path.join(SHARED_DIR, f)) > MIN_FILE_SIZE
     ]
 
@@ -316,21 +315,6 @@ def replicate_send_metrics():
         logger.error(f"Error enviando métricas cifradas: {str(e)}")
         return False
 
-
-def mark_file_as_processed(success=True):
-    """Renombra el archivo para marcarlo como procesado o fallido"""
-    global current_file
-    try:
-        if success:
-            new_path = current_file + ".processed"
-        else:
-            new_path = current_file + ".failed"
-
-        os.rename(current_file, new_path)
-        logger.info(f"Archivo marcado como {'procesado' if success else 'fallido'}.")
-    except Exception as e:
-        logger.error(f"Error marcando archivo: {str(e)}")
-
 # Modelo de entrada
 class ChoiceRequest(BaseModel):
     choice: str
@@ -347,8 +331,11 @@ def execute_choice(request: ChoiceRequest):
         files = find_analysis_files()
         if files:
             current_file = os.path.join(SHARED_DIR, files[0])
-            logger.info(f"Archivo seleccionado: {current_file}")
-            extract_parameters_from_analysis()
+            if current_file:
+                logger.info(f"Archivo seleccionado: {current_file}.")
+                extract_parameters_from_analysis()
+            else:
+                logger.info(f"No se encuentran archivos disponibles para procesarse.")
 
     if choice == "1":
         state = replicate_authentication("device->gateway", gateway_host_mapfs)
@@ -359,6 +346,10 @@ def execute_choice(request: ChoiceRequest):
     elif choice == "4":
         state = replicate_revocation(False)
     elif choice == "5":
+        new_path = current_file + ".processed"
+        os.rename(current_file, new_path)
+        current_file = ""  # Limpiar el archivo actual para buscar otro
+    elif choice == "6":
         return {"message": "Saliendo del servicio."}
 
     message = "El ataque fue exitoso." if state else "El ataque no ha sido exitoso."
@@ -368,6 +359,7 @@ def execute_choice(request: ChoiceRequest):
 if __name__ == "__main__":
     os.makedirs("../../Logs/", mode=0o777, exist_ok=True)
     os.makedirs(SHARED_DIR, exist_ok=True)
+    
     logger.info("Iniciando servicio de replicación.")
     
     # Iniciar interfaz gráfica para que el usuario seleccione el ataque de su interés
